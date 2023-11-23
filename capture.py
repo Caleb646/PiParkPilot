@@ -1,11 +1,19 @@
 import cv2 as cv
 
-left_cap = cv.VideoCapture(0)
-right_cap = cv.VideoCapture(2)
+left_cap = cv.VideoCapture(2)
+left_cap.set(cv.CAP_PROP_FOURCC, cv.VideoWriter_fourcc("M", "J", "P", "G"))
+right_cap = cv.VideoCapture(0)
+right_cap.set(cv.CAP_PROP_FOURCC, cv.VideoWriter_fourcc("M", "J", "P", "G"))
 num = 0
 while left_cap.isOpened() and right_cap.isOpened():
-    succes1, left_img = left_cap.read()
-    succes2, right_img = right_cap.read()
+#while right_cap.isOpened():
+    #success1 = left_cap.grab()
+    #success2 = right_cap.grab()
+    success1, left_img = left_cap.read()
+    success2, right_img = right_cap.read()
+    #print(f"Left Success: {success1} --- Right Success: {success2}")
+    #left_img = left_cap.retrieve()
+    #right_img = right_cap.retrieve()
     k = cv.waitKey(5)
     if k == 27:
         break
