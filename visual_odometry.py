@@ -6,47 +6,21 @@ from typing import Tuple, List
 
 from kp_matcher import KPMatcher
 
-
-if False:
-    # Camera parameters to undistort and rectify images
-    cv_file = cv.FileStorage()
-    cv_file.open('stereoMap.xml', cv.FileStorage_READ)
-
-    stereoMapL_x = cv_file.getNode('stereoMapL_x').mat()
-    stereoMapL_y = cv_file.getNode('stereoMapL_y').mat()
-    stereoMapR_x = cv_file.getNode('stereoMapR_x').mat()
-    stereoMapR_y = cv_file.getNode('stereoMapR_y').mat()
-    left_stereo_projection = cv_file.getNode('left_stereo_projection').mat()
-    right_stereo_projection = cv_file.getNode('right_stereo_projection').mat()
-    focal_length_mm = float(cv_file.getNode("focal_length_mm"))
-
-    # Stereo vision setup parameters
-    frame_rate = 30     # Camera frame rate
-    cameras_distance_apart_cm = 9               # Distance between the cameras [cm]
-    focal_length_mm = focal_length_mm        # Camera lense's focal length [mm]
-    horizontal_fov = 45          # Camera field of view in the horisontal plane [degrees]
-
-    def undistort_rectify(left: cv.Mat, right: cv.Mat):
-        undistortedL = cv.remap(left, stereoMapL_x, stereoMapL_y, cv.INTER_LANCZOS4, cv.BORDER_CONSTANT, 0)
-        undistortedR = cv.remap(right, stereoMapR_x, stereoMapR_y, cv.INTER_LANCZOS4, cv.BORDER_CONSTANT, 0)
-        return undistortedL, undistortedR
-
-    def test_undistort():
-        cap_right = cv.VideoCapture(2, cv.CAP_DSHOW)                    
-        cap_left =  cv.VideoCapture(0, cv.CAP_DSHOW)
-        while cap_right.isOpened() and cap_left.isOpened():
-            success_right, frame_right = cap_right.read()
-            success_left, frame_left = cap_left.read()
-            frame_left, frame_right = undistort_rectify(frame_left, frame_right)                      
-            # Show the frames
-            cv.imshow("Frame Left", frame_left)
-            cv.imshow("Frame Right", frame_right) 
-            if cv.waitKey(1) & 0xFF == ord('q'):
-                break
-        cap_right.release()
-        cap_left.release()
-
-        cv.destroyAllWindows()
+def undistort_rectify(
+        left: cv.Mat, 
+        right: cv.Mat,
+        left_x_map: cv.Mat,
+        left_y_map: cv.Mat,
+        right_x_map: cv.Mat,
+        right_y_map: cv.Mat
+        ):
+    left_undistorted = cv.remap(
+        left, left_x_map, left_y_map, cv.INTER_LANCZOS4, cv.BORDER_CONSTANT, 0
+        )
+    right_undistorted = cv.remap(
+        right, right_x_map, right_y_map, cv.INTER_LANCZOS4, cv.BORDER_CONSTANT, 0
+        )
+    return left_undistorted, right_undistorted
 
 def calculate_disparity_map(img_left: cv.Mat, img_right: cv.Mat):
         sad_window = 6
@@ -66,9 +40,12 @@ def calculate_disparity_map(img_left: cv.Mat, img_right: cv.Mat):
         disp_left = matcher.compute(img_left, img_right).astype(np.float32) / 16
         return disp_left
 
+def decompose_euler_angles_from_proj_mat(proj_mat: np.ndarray):
+    _, _, _, _, _, _, euler_angles = cv.decomposeProjectionMatrix(proj_mat)
+    return euler_angles
+
 def decompose_projection_matrix(
-        proj_mat: np.ndarray,
-        return_euler_angles = False
+        proj_mat: np.ndarray
         ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Returns
@@ -84,8 +61,6 @@ def decompose_projection_matrix(
     # eulerAngles 3-element vector containing three Euler angles of rotation in degrees.
     cam_intrinsic, cam_rotation, cam_translation, _, _, _, euler_angles = cv.decomposeProjectionMatrix(proj_mat)
     cam_translation = (cam_translation / cam_translation[3])[:3]
-    if return_euler_angles:
-        cam_intrinsic, cam_rotation, cam_translation, euler_angles
     return cam_intrinsic, cam_rotation, cam_translation
 
 def decompose_rotation_matrix(rot: np.ndarray):
@@ -215,6 +190,9 @@ class VisualOdometry:
         cur_points = np.delete(cur_img_matched_pts, delete, axis=0)
         next_points = np.delete(next_img_matched_pts, delete, axis=0)
         
+        if cur_img_3d_object_points.shape[0] < 5 or next_points.shape[0] < 5:
+            return None, None, None, None, False
+
         _, rvec, tvec, inliers = cv.solvePnPRansac(
             cur_img_3d_object_points, next_points, self.left_cam_intrinsic, None
             )
@@ -222,7 +200,7 @@ class VisualOdometry:
         # Above function returns axis angle rotation representation rvec, use Rodrigues formula
         # to convert this to our desired format of a 3x3 rotation matrix
         rmat = cv.Rodrigues(rvec)[0]
-        return rmat, tvec, cur_points, next_points
+        return rmat, tvec, cur_points, next_points, True
 
 if __name__ == "__main__":
     pass

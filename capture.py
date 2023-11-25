@@ -1,17 +1,24 @@
 import cv2 as cv
+import utils
 
-left_cap = cv.VideoCapture(0)
-right_cap = cv.VideoCapture(2)
+
+config = utils.load_yaml_file()
+left_cap = cv.VideoCapture(config["left_camera_id"])
+left_cap.set(cv.CAP_PROP_FOURCC, cv.VideoWriter_fourcc("M", "J", "P", "G"))
+#right_cap = cv.VideoCapture(2) # for Raspberry Pi
+right_cap = cv.VideoCapture(config["right_camera_id"])
+right_cap.set(cv.CAP_PROP_FOURCC, cv.VideoWriter_fourcc("M", "J", "P", "G"))
 num = 0
+
 while left_cap.isOpened() and right_cap.isOpened():
     succes1, left_img = left_cap.read()
     succes2, right_img = right_cap.read()
     k = cv.waitKey(5)
-    if k == 27:
+    if k == ord("q") or k == 27: # press q or esc to quit
         break
     elif k == ord('s'): # wait for 's' key to save and exit
-        cv.imwrite('data/calib/left_imgs/img_' + str(num) + '.png', left_img)
-        cv.imwrite('data/calib/right_imgs/img_' + str(num) + '.png', right_img)
+        cv.imwrite(f'{config["left_imgs_path"]}/img_' + str(num) + '.png', left_img)
+        cv.imwrite(f'{config["right_imgs_path"]}/img_' + str(num) + '.png', right_img)
         print("images saved!")
         num += 1
 
