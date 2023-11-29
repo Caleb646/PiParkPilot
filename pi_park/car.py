@@ -4,6 +4,7 @@ import math
 import time
 import asyncio
 import logging
+import sys
 from scipy.optimize import minimize
 from typing import Tuple, List, Union, Dict
 
@@ -158,6 +159,7 @@ class Car:
 
         self.current_path: np.ndarray = np.zeros((1,1))
         self.end_pos: Union[List[float, float, float], None] = None
+        self.aspect_ratio: Union[float, None] = None
         """
         units -> meters. Contains the x, z, and y axis rotation values for the
         desired end position.
@@ -210,21 +212,22 @@ class Car:
             cv.imshow("Should be Left Camera", left_img)
             cv.imshow("Should be Right Camera", right_img)
 
-    def step(self, verbose=False):
+    def step(self):
         start_time = time.time()
-        left_next_img, right_next_img = self.read_images(verbose=verbose)
+        left_next_img, right_next_img = self.read_images()
         if left_next_img is None or right_next_img is None:
             self.left_prev_img, self.right_prev_img = None, None
             logger.error("Failed to get next image frames.")
             return time.time() - start_time
         if self.left_prev_img is None or self.right_prev_img is None:
             # TODO: probably want to find the end destination here.
-            self.end_pos = (0, 10, self.yrot)
+            self.end_pos = (0, 10, self.yrot) # x, z, y rotation
+            self.aspect_ratio = (self.end_pos[1] - self.zpos) / (self.end_pos[0] - self.xpos)
             x_car, _, z_car, y_rot = self.position
             self.current_path = generate_path(
                 (x_car, z_car, y_rot),
                 self.end_pos
-                ) # NOTE: Graphing this path will be weird unless its transposed
+                )
             self.left_prev_img, self.right_prev_img = left_next_img, right_next_img
             logger.warn("Previous images are none")
             return time.time() - start_time
@@ -278,9 +281,9 @@ class Car:
             await asyncio.sleep(sleep_time)
             logger.info(f"Step Time: {step_time} seconds ---- Sleep Time {sleep_time} seconds")
     
-    def drive_without_server_(self, target_fps=15, verbose=False):
-        while not self.at_end_pos(verbose=True):
-            step_time = self.step(verbose=verbose)
+    def drive_without_server_(self, target_fps=15):
+        while not self.at_end_pos():
+            step_time = self.step()
             sleep_time = max((1/target_fps) - step_time, 0.01)
             if sleep_time > 0:
                 time.sleep(sleep_time)
@@ -289,11 +292,12 @@ class Car:
     def get_network_data(self):
         # TODO: y rotation should be offset because left camera will be angled
         return {
+            "aspect_ratio": self.aspect_ratio, # (z_end - z_start) / (x_end - x_start) or height / width
             "cur_pos": (self.xpos_normed, self.zpos_normed, self.yrot), # (x, z, y_rotation)
             "cur_path": self.current_path.tolist()
         }
         
-    def read_images(self, to_gray_scale=True, verbose=False):
+    def read_images(self, to_gray_scale=True):
         assert self.left_cap.isOpened() and self.right_cap.isOpened()
         #if self.left_cap.isOpened() and self.right_cap.isOpened():
         # TODO: reading the left and right images may need to be synchronized 
@@ -351,7 +355,6 @@ if __name__ == "__main__":
     cv.imshow('dst', thresh)
     cv.waitKey(0)
     cv.destroyAllWindows()
-
 
     ws = ws_server.WebSocketServer(host="localhost")
     path = generate_path((0, 0, 0), (5.31114, 1.8288, 0))

@@ -1,0 +1,6 @@
+H Low High
+H 0 36
+S Low High
+S 0 15
+V Low High
+V 249 255

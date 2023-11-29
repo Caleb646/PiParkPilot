@@ -12,6 +12,5 @@ from pi_park.api import car, utils, vo
 
 
 if __name__ == "__main__":
-    logger = logging.getLogger(__name__)
-    logger.info("Testing")
-    pass
+    car_ = car.Car(should_camera_check=False)
+    car_.drive_without_server_(target_fps=10, verbose=True)
