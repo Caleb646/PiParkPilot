@@ -1,0 +1,18 @@
+# Chessboard Setup
+# the inner corner counts for a single row and column
+chessboard_size: [15, 10] 
+# the pixel (height, width) for the calib images
+frame_size: [640, 480]
+square_size_meters: 0.0142875 # in meters
+# Calibration Setup and Images
+root_calib_path: "./data/calib"
+left_imgs_path: "./data/calib/left_imgs/"
+right_imgs_path: "./data/calib/right_imgs/"
+stereo_map_path: "./data/calib/stereo_map.xml"
+max_allowable_rmse: 0.25
+# Camera Setup
+left_cam_id: 0
+right_cam_id: 1
+# Car Setup
+max_steering_angle: 25 # in degrees
+axles_distance: 2 # in meters
