@@ -7,12 +7,11 @@ import logging
 import sys
 from scipy.optimize import minimize
 from typing import Tuple, List, Union, Dict
+import os
 
 import pi_park.visual_odometry as vo
 import pi_park.server as ws_server
 import pi_park.utils as utils
-
-logger = logging.getLogger(__name__)
 
 def generate_path(
         start_pos: Tuple[float, float, float], 
@@ -51,8 +50,8 @@ def generate_path(
         points[i] = [x, y]
     points = np.array(points)
     if normalize:
-        points[:, 0] /= end_x
-        points[:, 1] /= end_y
+        points[:, 0] /= end_x + 0.000001
+        points[:, 1] /= end_y + 0.000001
     return points
 
 def detect_lines(left_img: cv.Mat):
@@ -111,9 +110,11 @@ def detect_corners(left_img: cv.Mat):
 class Car:
     def __init__(
             self, 
-            config_path="./configs/basic_config.yml",
+            config_path: str,
+            img_log_dir: Union[str, None] = None,
             should_camera_check=True
             ):
+        self.logger = logging.getLogger(__name__)
         self.config = utils.load_yaml_file(config_path)
 
         cv_file = cv.FileStorage()
@@ -173,6 +174,11 @@ class Car:
         The distance between the front and rear axles in meters.
         """
         self.server_ = ws_server.WebSocketServer()
+        self.calibrated_frame_size = tuple(self.config["frame_size"])
+
+        self.img_log_dir = img_log_dir
+        if self.img_log_dir is not None:
+            utils.clear_dir(self.img_log_dir)
 
         if should_camera_check:
             self.visually_check_cameras()
@@ -217,19 +223,19 @@ class Car:
         left_next_img, right_next_img = self.read_images()
         if left_next_img is None or right_next_img is None:
             self.left_prev_img, self.right_prev_img = None, None
-            logger.error("Failed to get next image frames.")
+            self.logger.error("Failed to get next image frames.")
             return time.time() - start_time
         if self.left_prev_img is None or self.right_prev_img is None:
             # TODO: probably want to find the end destination here.
             self.end_pos = (0, 10, self.yrot) # x, z, y rotation
-            self.aspect_ratio = (self.end_pos[1] - self.zpos) / (self.end_pos[0] - self.xpos)
+            self.aspect_ratio = (self.end_pos[1] - self.zpos) / (self.end_pos[0] + 0.000001 - self.xpos)
             x_car, _, z_car, y_rot = self.position
             self.current_path = generate_path(
                 (x_car, z_car, y_rot),
                 self.end_pos
                 )
             self.left_prev_img, self.right_prev_img = left_next_img, right_next_img
-            logger.warn("Previous images are none")
+            self.logger.warn("Previous images are none")
             return time.time() - start_time
         updated_rotation, updated_position, _, _, succeeded = self.visual_od.estimate_motion(
             self.left_prev_img, self.right_prev_img, left_next_img, right_next_img
@@ -246,19 +252,19 @@ class Car:
             # world space instead of vice versa.
             self.mat_current_position = self.mat_current_position.dot(np.linalg.inv(Tmat))[:3, :]
             self.left_prev_img, self.right_prev_img = left_next_img, right_next_img
-            logger.info(f"New Position: {self.position}")
+            self.logger.info(f"New Position: {self.position}")
         else:
-            logger.error("Failed to estimate motion")
+            self.logger.error("Failed to estimate motion")
             # TODO: Temporary
             self.left_prev_img, self.right_prev_img = None, None
         return time.time() - start_time
     
     def at_end_pos(self, dist_from=0.3):
         if self.end_pos is None:
-            logger.warn("self.end_pos is None")
+            self.logger.warn("self.end_pos is None")
             return False
         d = np.squeeze(np.sqrt((self.xpos - self.end_pos[0])**2 + (self.zpos - self.end_pos[1])**2))
-        logger.info(f"{d} meters away from end destination")
+        self.logger.info(f"{d} meters away from end destination")
         if d <= dist_from: # 0.3 meters = ~1 foot
             return True
         return False
@@ -279,7 +285,7 @@ class Car:
             sleep_time = max((1/target_fps) - step_time, 0.01)
             await self.server_.send(self.get_network_data())
             await asyncio.sleep(sleep_time)
-            logger.info(f"Step Time: {step_time} seconds ---- Sleep Time {sleep_time} seconds")
+            self.logger.info(f"Step Time: {step_time} seconds ---- Sleep Time {sleep_time} seconds")
     
     def drive_without_server_(self, target_fps=15):
         while not self.at_end_pos():
@@ -287,7 +293,7 @@ class Car:
             sleep_time = max((1/target_fps) - step_time, 0.01)
             if sleep_time > 0:
                 time.sleep(sleep_time)
-            logger.info(f"Step Time: {step_time} seconds ---- Sleep Time {sleep_time} seconds")
+            self.logger.info(f"Step Time: {step_time} seconds ---- Sleep Time {sleep_time} seconds")
 
     def get_network_data(self):
         # TODO: y rotation should be offset because left camera will be angled
@@ -308,10 +314,24 @@ class Car:
         s2 = time.time()
         right_success, right = self.right_cap.read()
         e2 = time.time()
+        self.logger.info(
+            f"Left Image Res (h, w, c): {left.shape} ----- Right Image Res (h, w, c): {right.shape}"
+            )
+        if not self.calibrated_frame_size == left.shape[:2]\
+            or not self.calibrated_frame_size == right.shape[:2]:
+            self.logger.error(
+                f"Image Res != calibrated res. "
+                f"Left Image Res (h, w): {left.shape[:2]} ----- Right Image Res (h, w): {right.shape[:2]}"
+                f" ----- Calibrated Res: {self.calibrated_frame_size}"
+                )
+            raise ValueError("Calib Res != Image Res")
         if not left_success or not right_success:
-            logger.error(f"Left Camera Failed: {not left_success} ----- Right Camera Failed: {not right_success}")
+            self.logger.error(f"Left Camera Failed: {not left_success} ----- Right Camera Failed: {not right_success}")
             return None, None
-        logger.info(f"Left Image -> Duration: {e1 - s1} End: {e1} -- Right Image -> Duration: {e2 - s2} End: {e2}")
+        self.logger.info(
+            f"Left Cam -> Duration: {round(e1 - s1, 4)} ---- Right Cam -> Duration: {round(e2 - s2, 4)} "
+            f"--- Out of Sync by {round(abs(e2-e1), 4)} seconds"
+            )
         if to_gray_scale:
             left, right = cv.cvtColor(left, cv.COLOR_BGR2GRAY), cv.cvtColor(right, cv.COLOR_BGR2GRAY)
         left, right = vo.undistort_rectify(
@@ -322,6 +342,12 @@ class Car:
             self.right_x_stereo_map,
             self.right_y_stereo_map
             )
+        if self.img_log_dir is not None:
+            cur_time = utils.get_current_time()
+            left_path = os.path.join(self.img_log_dir, f"left_{cur_time}.jpg")
+            right_path = os.path.join(self.img_log_dir, f"right_{cur_time}.jpg")
+            cv.imwrite(left_path, left)
+            cv.imwrite(right_path, right)
         return left, right
     
 if __name__ == "__main__":
