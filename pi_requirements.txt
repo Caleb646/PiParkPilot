@@ -1,0 +1,5 @@
+numpy==1.26.2
+opencv-contrib-python==4.4.0.46
+PyYAML==6.0.1
+scipy==1.11.4
+websockets==12.0

@@ -2,7 +2,7 @@
 # the inner corner counts for a single row and column
 chessboard_size: [15, 10] 
 # the pixel (height, width) for the calib images
-frame_size: [640, 480]
+frame_size: [480, 640]
 square_size_meters: 0.0142875 # in meters
 # Calibration Setup and Images
 root_calib_path: "./data/calib"
@@ -16,3 +16,8 @@ right_cam_id: 1
 # Car Setup
 max_steering_angle: 25 # in degrees
 axles_distance: 2 # in meters
+# Visual Odometry Setup
+# TODO: implement these
+max_allowable_distance_meters: 15
+detector_kp: "orb"
+matcher_kp: "knn"

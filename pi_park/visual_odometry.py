@@ -2,9 +2,12 @@ import numpy as np
 import cv2 as cv
 from scipy.optimize import minimize
 import math
+import logging
+import time
 from typing import Tuple, List
 
 from pi_park.kp_matcher import KPMatcher
+import pi_park.utils as utils
 
 def undistort_rectify(
         left: cv.Mat, 
@@ -102,8 +105,9 @@ class VisualOdometry:
             left_cam_3dto2d_proj_mat: np.ndarray, 
             right_cam3dto2d_proj_mat: np.ndarray,
             keypt_matcher: KPMatcher = None,
-            max_depth_meters: int = 3_000 # meters
+            max_depth_meters: int = 5 # meters
             ) -> None:
+        self.logger = logging.getLogger(__name__)
         self.left_proj_mat = left_cam_3dto2d_proj_mat
         self.right_proj_mat = right_cam3dto2d_proj_mat
         self.keypt_matcher = KPMatcher() if keypt_matcher is None else keypt_matcher
@@ -160,8 +164,16 @@ class VisualOdometry:
             next_left_img: cv.Mat, 
             next_right_img: cv.Mat
             ):
-        matches, cur_img_matched_pts, next_img_matched_pts = self.keypt_matcher.find_keypoints(cur_left_img, next_left_img)
-        depth_map = stereo_to_depth(cur_left_img, cur_right_img, self.left_proj_mat, self.right_proj_mat)
+        start_time = time.time()
+        matches, cur_img_matched_pts, next_img_matched_pts = None, None, None
+        with utils.Timer(self.logger.debug, "KP Matching Time: {} seconds"):
+            matches, cur_img_matched_pts, next_img_matched_pts = self.keypt_matcher.find_keypoints(cur_left_img, next_left_img)
+
+        depth_map = None
+        with utils.Timer(self.logger.debug, "Depth Map Creation Time: {} seconds"):
+            # TODO: Is there a way to compute the depth just the matched points???
+            # This takes more than a 0.5 seconds to run on the pi
+            depth_map = stereo_to_depth(cur_left_img, cur_right_img, self.left_proj_mat, self.right_proj_mat)
 
         rmat = np.eye(3)
         tvec = np.zeros((3, 1))
@@ -174,32 +186,56 @@ class VisualOdometry:
         cur_img_3d_object_points = np.zeros((0, 3))
         delete = []
 
-        # Extract depth information of query image at match points and build 3D positions
-        for i, (u, v) in enumerate(cur_img_matched_pts):
-            z = depth_map[int(v), int(u)]
-            # remove matched points with a depth greater than max_depth.
-            # Because these points are most likely noise
-            if z > self.max_depth_m:
-                delete.append(i)
-                continue
-                
-            x = z*(u-cx)/fx
-            y = z*(v-cy)/fy
-            cur_img_3d_object_points = np.vstack([cur_img_3d_object_points, np.array([x, y, z])])
-
+        with utils.Timer(self.logger.debug, "Filtering 3D pts beyond max depth Time: {} seconds"):
+            # Extract depth information of query image at match points and build 3D positions
+            for i, (u, v) in enumerate(cur_img_matched_pts):
+                z = depth_map[int(v), int(u)]
+                # remove matched points with a depth greater than max_depth.
+                # Because these points are most likely noise
+                if z > self.max_depth_m:
+                    delete.append(i)
+                    continue
+                    
+                x = z * (u - cx) / fx
+                y = z * (v - cy) / fy
+                cur_img_3d_object_points = np.vstack([cur_img_3d_object_points, np.array([x, y, z])])
+            self.logger.debug(
+                f"Removed [{len(delete)}] out of [{cur_img_matched_pts.shape[0]}] 3D pts because "
+                f"because they exceed the max depth of [{self.max_depth_m}]"
+                )
+        # If there are fewer than 25 3D pts
+        # if cur_img_3d_object_points.shape[0] < 25:
+        #     self.logger.error(
+        #         f"Total 3D pts [{cur_img_3d_object_points.shape[0]}] is less than 25"
+        #     )
+        #     return None, None, None, None, False
         cur_points = np.delete(cur_img_matched_pts, delete, axis=0)
         next_points = np.delete(next_img_matched_pts, delete, axis=0)
         
-        if cur_img_3d_object_points.shape[0] < 5 or next_points.shape[0] < 5:
+        if cur_img_3d_object_points.shape[0] < 6 or next_points.shape[0] < 6:
+            self.logger.error(
+                f"Not enough 3D object pts or 2D image points "
+                f"to estimate new camera projection matrix."
+                )
             return None, None, None, None, False
 
-        _, rvec, tvec, inliers = cv.solvePnPRansac(
-            cur_img_3d_object_points, next_points, self.left_cam_intrinsic, None
-            )
+        succeeded, rvec, tvec, inliers = False, None, None, None
+        with utils.Timer(self.logger.debug, "Computing Camera Proj Mat Time: {} seconds"):
+            succeeded, rvec, tvec, inliers = cv.solvePnPRansac(
+                cur_img_3d_object_points, 
+                next_points, 
+                self.left_cam_intrinsic, 
+                None,
+                iterationsCount=200,
+                reprojectionError=5.0,
+                confidence=0.99
+                )
+        if succeeded is False:
+            self.logger.error(f"Failed to solve for camera projection matrix")
+            return None, None, None, None, False
         
-        # Above function returns axis angle rotation representation rvec, use Rodrigues formula
-        # to convert this to our desired format of a 3x3 rotation matrix
         rmat = cv.Rodrigues(rvec)[0]
+        self.logger.info(f"Took {time.time() - start_time} seconds to successfully estimate motion.")
         return rmat, tvec, cur_points, next_points, True
 
 if __name__ == "__main__":

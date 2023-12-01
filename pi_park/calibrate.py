@@ -1,19 +1,28 @@
 import numpy as np
 import cv2 as cv
 import glob
-
+import argparse
+import os
 import utils
 
+parser = argparse.ArgumentParser()
+parser.add_argument('--path', help='Config Path', type=str)
+parser.add_argument(
+    '--camera', help = '(int between 0 and 1) Should visualize calibration images?', default=0, type=int
+    )
+args = parser.parse_args()
+assert os.path.exists(args.path), f"Config path doesnt exist: {args.path}"
+# Example: python pi_park/calibrate.py --path="./pi_park/configs/pi_config.yml"
+config = utils.load_yaml_file(path=args.path)
 
-config = utils.load_yaml_file()
-
-chessboardSize = config["chessboard_size"]
-frameSize = config["frame_size"]
+chessboard_size = tuple(config["chessboard_size"])
+# Height, Width
+frame_size = tuple(config["frame_size"])
 # termination criteria
 criteria = (cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 30, 0.001)
 
-objp = np.zeros((chessboardSize[0] * chessboardSize[1], 3), np.float32)
-objp[:,:2] = np.mgrid[0:chessboardSize[0],0:chessboardSize[1]].T.reshape(-1,2)
+objp = np.zeros((chessboard_size[0] * chessboard_size[1], 3), np.float32)
+objp[:,:2] = np.mgrid[0:chessboard_size[0],0:chessboard_size[1]].T.reshape(-1,2)
 
 chessboard_squares_size = config["square_size_meters"] # in meters == ~0.56 inches
 objp = objp * chessboard_squares_size
@@ -30,14 +39,17 @@ imagesRight = sorted(glob.glob(f'{config["right_imgs_path"]}/*.png'))
 show_images = False
 for imgLeft, imgRight in zip(imagesLeft, imagesRight):
 
-    imgL = cv.imread(imgLeft)
-    imgR = cv.imread(imgRight)
-    grayL = cv.cvtColor(imgL, cv.COLOR_BGR2GRAY)
-    grayR = cv.cvtColor(imgR, cv.COLOR_BGR2GRAY)
+    left_img = cv.imread(imgLeft)
+    right_img = cv.imread(imgRight)
+    grayL = cv.cvtColor(left_img, cv.COLOR_BGR2GRAY)
+    grayR = cv.cvtColor(right_img, cv.COLOR_BGR2GRAY)
 
+
+    assert frame_size == left_img.shape[:2]
+    assert frame_size == right_img.shape[:2]
     # Find the chess board corners
-    retL, cornersL = cv.findChessboardCorners(grayL, chessboardSize, None)
-    retR, cornersR = cv.findChessboardCorners(grayR, chessboardSize, None)
+    retL, cornersL = cv.findChessboardCorners(grayL, chessboard_size, None)
+    retR, cornersR = cv.findChessboardCorners(grayR, chessboard_size, None)
 
     # If found, add object points, image points (after refining them)
     if retL and retR == True:
@@ -49,10 +61,10 @@ for imgLeft, imgRight in zip(imagesLeft, imagesRight):
 
         if show_images:
             # Draw and display the corners
-            cv.drawChessboardCorners(imgL, chessboardSize, cornersL, retL)
-            cv.imshow('img left', imgL)
-            cv.drawChessboardCorners(imgR, chessboardSize, cornersR, retR)
-            cv.imshow('img right', imgR)
+            cv.drawChessboardCorners(left_img, chessboard_size, cornersL, retL)
+            cv.imshow('img left', left_img)
+            cv.drawChessboardCorners(right_img, chessboard_size, cornersR, retR)
+            cv.imshow('img right', right_img)
             cv.waitKey(5000)
 
 
@@ -60,11 +72,11 @@ cv.destroyAllWindows()
 
 ############## CALIBRATION #######################################################
 
-retL, cameraMatrixL, distL, rvecsL, tvecsL = cv.calibrateCamera(objpoints, imgpointsL, frameSize, None, None)
-heightL, widthL, channelsL = imgL.shape
+retL, cameraMatrixL, distL, rvecsL, tvecsL = cv.calibrateCamera(objpoints, imgpointsL, frame_size, None, None)
+heightL, widthL, channelsL = left_img.shape
 
-retR, cameraMatrixR, distR, rvecsR, tvecsR = cv.calibrateCamera(objpoints, imgpointsR, frameSize, None, None)
-heightR, widthR, channelsR = imgR.shape
+retR, cameraMatrixR, distR, rvecsR, tvecsR = cv.calibrateCamera(objpoints, imgpointsR, frame_size, None, None)
+heightR, widthR, channelsR = right_img.shape
 
 
 print(f"Left Cam RMSE: {retL} ----- Right Cam RMSE: {retR}") # Should be between 0.15 and 0.25
