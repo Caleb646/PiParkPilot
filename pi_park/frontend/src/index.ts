@@ -55,8 +55,10 @@ window.onload = () => {
 	function update_canvas(data: recv_data) {
 		if(data.cur_pos != null) {
 			indicator.set({
-				left: data.cur_pos[0] * CANVAS_WIDTH, // x
-				top: (Y_MAX - data.cur_pos[1]) * CANVAS_HEIGHT, // z
+				//left: data.cur_pos[0] * CANVAS_WIDTH, // x
+				left: data.cur_pos[1] * CANVAS_WIDTH, // z
+				//top: (Y_MAX - data.cur_pos[1]) * CANVAS_HEIGHT, // z
+				top: (Y_MAX - data.cur_pos[0]) * CANVAS_HEIGHT, // x
 				angle: 90 + data.cur_pos[2] // y rotation
 			});
 		}
@@ -79,8 +81,11 @@ window.onload = () => {
 			console.log("Succesfully Connected");
 		}
 		ws.onmessage = (ev: MessageEvent<any>) => {
+			console.log("Received message");	
 			const decoded_data: recv_data = JSON.parse(ev.data);
+			console.log(decoded_data.cur_pos);
 			update_canvas(decoded_data)
+			console.log(indicator.left, indicator.top);
 		}
 		return ws;
 	}
