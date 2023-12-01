@@ -9,7 +9,9 @@ from websockets.server import serve
 from websockets.sync.client import connect
 
 class WebSocketServer:
-    def __init__(self, host=socket.gethostbyname(socket.gethostname()), port=8000) -> None:
+    def __init__(
+            self, host=socket.gethostbyname(socket.gethostname()), port=8000
+            ) -> None:
         self.host = host
         self.port = port
         self.connections_ = set()
@@ -20,10 +22,17 @@ class WebSocketServer:
         for ws in self.connections_:
             await ws.send(encoded_data)
 
+    def has_connections(self) -> bool:
+        return len(self.connections_) > 0
+    
     def get_message(self) -> Dict[str, Any]:
         if self.messages_:
             return self.messages_.popleft()
         return {}
+    
+    async def shutdown(self):
+        for conn in self.connections_:
+            await conn.close()
 
     async def recv_(self, ws):
         async for message in ws:

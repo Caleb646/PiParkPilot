@@ -6,12 +6,17 @@ import asyncio
 import logging
 import sys
 from scipy.optimize import minimize
+from scipy.interpolate import CubicSpline
 from typing import Tuple, List, Union, Dict
 import os
 
 import pi_park.visual_odometry as vo
 import pi_park.server as ws_server
 import pi_park.utils as utils
+
+# NOTE: If car.py is imported multiple times this can cause the logger
+# to be instantiated multiple time. 
+logger = logging.getLogger(__name__)
 
 def generate_path(
         start_pos: Tuple[float, float, float], 
@@ -30,28 +35,44 @@ def generate_path(
     
     start_x, start_y, start_theta = start_pos
     end_x, end_y, end_theta = end_pos
-    initial_parameters = [1, 1, 1.3, 0.7, 0.8, 1.9, 1.9, 1.2]
-    constraints = (
-            {'type': 'eq', 'fun': lambda x: x[0] - start_x},
-            {'type': 'eq', 'fun': lambda x: x[4] - start_y},
-            {'type': 'eq', 'fun': lambda x: x[5] - math.tan(math.radians(start_theta))},
-            {'type': 'eq', 'fun': lambda x: x[0] + x[1] + x[2] + x[3] - end_x},
-            {'type': 'eq', 'fun': lambda x: x[4] + x[5] + x[6] + x[7] - end_y},
-            {'type': 'eq', 'fun': lambda x: x[5] + 2 * x[6] + 3 * x[7] - math.tan(math.radians(end_theta))}
-        )
-    B = minimize(
-        lambda x : minimize_func(0, x), initial_parameters, tol=1e-6, constraints=constraints
-        ).x
-    points = [None for _ in range(final_time)]
-    for i in range(final_time):
-        p_out = to_p_domain(i, tf=final_time)
-        x = B[0] + B[1] * p_out + B[2] * p_out**2 + B[3] * p_out**3
-        y = B[4] + B[5] * p_out + B[6] * p_out**2 + B[7] * p_out**3
-        points[i] = [x, y]
-    points = np.array(points)
+
+    if not (abs(end_x) > 0 and abs(end_y) > 0):
+        logger.error(f"end_x -> {end_x} and end_y -> {end_y} can NOT be 0.")
+        raise ValueError(f"end_x -> {end_x} and end_y -> {end_y} can NOT be 0.")
+    if not (start_theta == 0 and end_theta == 0):
+        logger.error(f"starting -> {start_theta} and ending -> {end_theta} thetas must both be 0.")
+        raise ValueError(f"starting -> {start_theta} and ending -> {end_theta} thetas must both be 0.")
+    # initial_parameters = [1, 1, 1.3, 0.7, 0.8, 1.9, 1.9, 1.2]
+    # constraints = (
+    #         {'type': 'eq', 'fun': lambda x: x[0] - start_x},
+    #         {'type': 'eq', 'fun': lambda x: x[4] - start_y},
+    #         {'type': 'eq', 'fun': lambda x: x[5] - math.tan(math.radians(start_theta))},
+    #         {'type': 'eq', 'fun': lambda x: x[0] + x[1] + x[2] + x[3] - end_x},
+    #         {'type': 'eq', 'fun': lambda x: x[4] + x[5] + x[6] + x[7] - end_y},
+    #         {'type': 'eq', 'fun': lambda x: x[5] + 2 * x[6] + 3 * x[7] - math.tan(math.radians(end_theta))}
+    #     )
+    # B = minimize(
+    #     lambda x : minimize_func(0, x), initial_parameters, tol=1e-6, constraints=constraints
+    #     ).x
+    # points = [None for _ in range(final_time)]
+    # for i in range(final_time):
+    #     p_out = to_p_domain(i, tf=final_time)
+    #     x = B[0] + B[1] * p_out + B[2] * p_out**2 + B[3] * p_out**3
+    #     y = B[4] + B[5] * p_out + B[6] * p_out**2 + B[7] * p_out**3
+    #     points[i] = [x, y]
+    # points = np.array(points)
+
+    # Try generating the cubic spline with control points to enforce the starting 
+    # and ending positions' thetas
+    cs = CubicSpline(x=[start_x, start_x + 0.05, end_x - 0.05, end_x], y=[start_y, start_y, end_y, end_y])
+    # Controls how many points will be returned
+    xs = np.arange(0, end_x, 0.2)
+    ys = cs(xs)
+    points = np.hstack([xs[:, np.newaxis], ys[:, np.newaxis]])
+    
     if normalize:
-        points[:, 0] /= end_x + 0.000001
-        points[:, 1] /= end_y + 0.000001
+        points[:, 0] /= end_x
+        points[:, 1] /= end_y
     return points
 
 def detect_lines(left_img: cv.Mat):
@@ -111,10 +132,12 @@ class Car:
     def __init__(
             self, 
             config_path: str,
+            ip="127.0.1.1",
             img_log_dir: Union[str, None] = None,
             should_camera_check=True
             ):
-        self.logger = logging.getLogger(__name__)
+        #self.logger = logging.getLogger(__name__)
+        self.logger = logger
         self.config = utils.load_yaml_file(config_path)
 
         cv_file = cv.FileStorage()
@@ -158,7 +181,7 @@ class Car:
         self.left_prev_img: Union[cv.Mat, None] = None
         self.right_prev_img: Union[cv.Mat, None] = None
 
-        self.current_path: np.ndarray = np.zeros((1,1))
+        self.current_path: Union[np.ndarray, None] = None 
         self.end_pos: Union[List[float, float, float], None] = None
         self.aspect_ratio: Union[float, None] = None
         """
@@ -173,7 +196,7 @@ class Car:
         """
         The distance between the front and rear axles in meters.
         """
-        self.server_ = ws_server.WebSocketServer()
+        self.server_ = ws_server.WebSocketServer(host=ip)
         self.calibrated_frame_size = tuple(self.config["frame_size"])
 
         self.img_log_dir = img_log_dir
@@ -187,12 +210,15 @@ class Car:
     def position(self):
         y = self.mat_current_position[1, 3]
         return (self.xpos, y, self.zpos, self.yrot)
+    
     @property
     def xpos(self):
         return self.mat_current_position[0, 3]
+    
     @property
     def zpos(self):
         return self.mat_current_position[2, 3]
+    
     @property
     def yrot(self):
         """
@@ -201,12 +227,14 @@ class Car:
         ``units -> degrees.`` The rotation around the y axis.
         """
         return vo.decompose_rotation_matrix(self.mat_current_position[:3, :3])[1]
+    
     @property
     def xpos_normed(self):
         return self.xpos / (self.end_pos[0] - self.xpos)
+    
     @property
     def zpos_normed(self):
-        return self.zpos / (self.end_pos[1] - self.zpos)
+        return self.zpos / max((self.end_pos[1] - self.zpos), 1)
     
     def visually_check_cameras(self):
         while self.left_cap.isOpened() and self.right_cap.isOpened():
@@ -221,25 +249,37 @@ class Car:
     def step(self):
         start_time = time.time()
         left_next_img, right_next_img = self.read_images()
+        # Possible States -> We've failed to get the next set of images
         if left_next_img is None or right_next_img is None:
             self.left_prev_img, self.right_prev_img = None, None
             self.logger.error("Failed to get next image frames.")
             return time.time() - start_time
+        # Possible States -> Its the first frame or something failed and we've reset
         if self.left_prev_img is None or self.right_prev_img is None:
             # TODO: probably want to find the end destination here.
-            self.end_pos = (0, 10, self.yrot) # x, z, y rotation
-            self.aspect_ratio = (self.end_pos[1] - self.zpos) / (self.end_pos[0] + 0.000001 - self.xpos)
+            self.end_pos = (3, 3, 0) # x, z, y rotation
+
+            # Set the max allowed depth to the total distance from the camera's starting position
+            # to the ending position plus 2 
+            dist = np.squeeze(np.sqrt((self.xpos - self.end_pos[0])**2 + (self.zpos - self.end_pos[1])**2))
+            self.visual_od.max_depth_m = dist + 2
+
+            self.aspect_ratio = (self.end_pos[1] - self.zpos) /(self.end_pos[0] - self.xpos)
             x_car, _, z_car, y_rot = self.position
-            self.current_path = generate_path(
-                (x_car, z_car, y_rot),
-                self.end_pos
-                )
+
+            # Only create the path once
+            if self.current_path is None:
+                self.current_path = generate_path(
+                    (x_car, z_car, y_rot),
+                    self.end_pos
+                    )
             self.left_prev_img, self.right_prev_img = left_next_img, right_next_img
             self.logger.warn("Previous images are none")
             return time.time() - start_time
         updated_rotation, updated_position, _, _, succeeded = self.visual_od.estimate_motion(
             self.left_prev_img, self.right_prev_img, left_next_img, right_next_img
             )
+        # Possible States
         if succeeded:
             # Is the updated path following the generated path? Do I even need to check this?
             Tmat = np.eye(4)
@@ -269,9 +309,9 @@ class Car:
             return True
         return False
     
-    async def drive(self, verbose=False) -> None:
+    async def drive(self, target_fps=15) -> None:
         run_server = asyncio.create_task(self.server_.run())
-        driving = asyncio.create_task(self.drive_(verbose=verbose))
+        driving = asyncio.create_task(self.drive_(target_fps=target_fps))
         done, pending = await asyncio.wait(
             [run_server, driving],
             return_when=asyncio.FIRST_COMPLETED
@@ -279,14 +319,22 @@ class Car:
         for task in pending:
             task.cancel()
     
-    async def drive_(self, target_fps=15, verbose=False):
-        while not self.at_end_pos(verbose=verbose):
-            step_time = self.step(verbose=verbose)
-            sleep_time = max((1/target_fps) - step_time, 0.01)
-            await self.server_.send(self.get_network_data())
-            await asyncio.sleep(sleep_time)
-            self.logger.info(f"Step Time: {step_time} seconds ---- Sleep Time {sleep_time} seconds")
-    
+    async def drive_(self, target_fps=15):
+        while not self.at_end_pos():
+            if self.server_.has_connections():
+                step_time = self.step()
+                sleep_time = max((1/target_fps) - step_time, 0.01)
+                self.logger.info(
+                    f"Step Time: {step_time} seconds ---- Sleep Time {sleep_time} seconds"
+                    )
+                await self.server_.send(self.get_network_data())
+                await asyncio.sleep(sleep_time)
+            else:
+                self.logger.info(
+                    f"Server at: {f'{self.server_.host}:{self.server_.port}'} waiting for connection."
+                    )
+                await asyncio.sleep(0.5)
+            
     def drive_without_server_(self, target_fps=15):
         while not self.at_end_pos():
             step_time = self.step()
@@ -294,6 +342,12 @@ class Car:
             if sleep_time > 0:
                 time.sleep(sleep_time)
             self.logger.info(f"Step Time: {step_time} seconds ---- Sleep Time {sleep_time} seconds")
+
+    async def shutdown(self):
+        self.left_cap.release()
+        self.right_cap.release()
+        self.left_prev_img, self.right_prev_img = None, None
+        await self.server_.shutdown()
 
     def get_network_data(self):
         # TODO: y rotation should be offset because left camera will be angled
@@ -314,7 +368,7 @@ class Car:
         s2 = time.time()
         right_success, right = self.right_cap.read()
         e2 = time.time()
-        self.logger.info(
+        self.logger.debug(
             f"Left Image Res (h, w, c): {left.shape} ----- Right Image Res (h, w, c): {right.shape}"
             )
         if not self.calibrated_frame_size == left.shape[:2]\
@@ -328,7 +382,7 @@ class Car:
         if not left_success or not right_success:
             self.logger.error(f"Left Camera Failed: {not left_success} ----- Right Camera Failed: {not right_success}")
             return None, None
-        self.logger.info(
+        self.logger.debug(
             f"Left Cam -> Duration: {round(e1 - s1, 4)} ---- Right Cam -> Duration: {round(e2 - s2, 4)} "
             f"--- Out of Sync by {round(abs(e2-e1), 4)} seconds"
             )

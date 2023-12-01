@@ -105,7 +105,7 @@ class VisualOdometry:
             left_cam_3dto2d_proj_mat: np.ndarray, 
             right_cam3dto2d_proj_mat: np.ndarray,
             keypt_matcher: KPMatcher = None,
-            max_depth_meters: int = 15 # meters
+            max_depth_meters: int = 5 # meters
             ) -> None:
         self.logger = logging.getLogger(__name__)
         self.left_proj_mat = left_cam_3dto2d_proj_mat
@@ -166,11 +166,13 @@ class VisualOdometry:
             ):
         start_time = time.time()
         matches, cur_img_matched_pts, next_img_matched_pts = None, None, None
-        with utils.Timer(self.logger.info, "KP Matching Time: {} seconds"):
+        with utils.Timer(self.logger.debug, "KP Matching Time: {} seconds"):
             matches, cur_img_matched_pts, next_img_matched_pts = self.keypt_matcher.find_keypoints(cur_left_img, next_left_img)
 
         depth_map = None
-        with utils.Timer(self.logger.info, "Depth Map Creation Time: {} seconds"):
+        with utils.Timer(self.logger.debug, "Depth Map Creation Time: {} seconds"):
+            # TODO: Is there a way to compute the depth just the matched points???
+            # This takes more than a 0.5 seconds to run on the pi
             depth_map = stereo_to_depth(cur_left_img, cur_right_img, self.left_proj_mat, self.right_proj_mat)
 
         rmat = np.eye(3)
@@ -184,7 +186,7 @@ class VisualOdometry:
         cur_img_3d_object_points = np.zeros((0, 3))
         delete = []
 
-        with utils.Timer(self.logger.info, "Filtering 3D pts beyond max depth Time: {} seconds"):
+        with utils.Timer(self.logger.debug, "Filtering 3D pts beyond max depth Time: {} seconds"):
             # Extract depth information of query image at match points and build 3D positions
             for i, (u, v) in enumerate(cur_img_matched_pts):
                 z = depth_map[int(v), int(u)]
@@ -197,11 +199,20 @@ class VisualOdometry:
                 x = z * (u - cx) / fx
                 y = z * (v - cy) / fy
                 cur_img_3d_object_points = np.vstack([cur_img_3d_object_points, np.array([x, y, z])])
-
+            self.logger.debug(
+                f"Removed [{len(delete)}] out of [{cur_img_matched_pts.shape[0]}] 3D pts because "
+                f"because they exceed the max depth of [{self.max_depth_m}]"
+                )
+        # If there are fewer than 25 3D pts
+        # if cur_img_3d_object_points.shape[0] < 25:
+        #     self.logger.error(
+        #         f"Total 3D pts [{cur_img_3d_object_points.shape[0]}] is less than 25"
+        #     )
+        #     return None, None, None, None, False
         cur_points = np.delete(cur_img_matched_pts, delete, axis=0)
         next_points = np.delete(next_img_matched_pts, delete, axis=0)
         
-        if cur_img_3d_object_points.shape[0] < 5 or next_points.shape[0] < 5:
+        if cur_img_3d_object_points.shape[0] < 6 or next_points.shape[0] < 6:
             self.logger.error(
                 f"Not enough 3D object pts or 2D image points "
                 f"to estimate new camera projection matrix."
@@ -209,12 +220,15 @@ class VisualOdometry:
             return None, None, None, None, False
 
         succeeded, rvec, tvec, inliers = False, None, None, None
-        with utils.Timer(self.logger.info, "Computing Camera Proj Mat Time: {} seconds"):
+        with utils.Timer(self.logger.debug, "Computing Camera Proj Mat Time: {} seconds"):
             succeeded, rvec, tvec, inliers = cv.solvePnPRansac(
                 cur_img_3d_object_points, 
                 next_points, 
                 self.left_cam_intrinsic, 
-                None
+                None,
+                iterationsCount=200,
+                reprojectionError=5.0,
+                confidence=0.99
                 )
         if succeeded is False:
             self.logger.error(f"Failed to solve for camera projection matrix")
