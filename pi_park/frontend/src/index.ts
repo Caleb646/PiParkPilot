@@ -84,8 +84,8 @@ window.onload = () => {
 			console.log("Received message");	
 			const decoded_data: recv_data = JSON.parse(ev.data);
 			console.log(decoded_data.cur_pos);
-			update_canvas(decoded_data)
-			console.log(indicator.left, indicator.top);
+			update_canvas(decoded_data);
+			console.log("Left: ", indicator.left, "Top", indicator.top);
 		}
 		return ws;
 	}

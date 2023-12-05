@@ -7,7 +7,7 @@ from typing import List, Tuple, Any, Union, Dict
 
 cv.Mat = np.ndarray
 
-def knn_match_filter(matches, d=0.5):
+def knn_match_filter(matches, d=0.7):
     """
     Parameters
     ------------
@@ -24,7 +24,7 @@ def knn_match_filter(matches, d=0.5):
             ret.append(m)
     return ret
 
-def bf_match_filter(matches: List[Any], top=100):
+def bf_match_filter(matches: List[Any], top=2_000):
     """
     Parameters
     ------------
@@ -39,7 +39,6 @@ def bf_match_filter(matches: List[Any], top=100):
 
 class KPMatcher:
     def __init__(self, detector="orb", matcher="knn") -> None:
-    #def __init__(self, detector="sift", matcher="knn") -> None:
         self.logger = logging.getLogger(__name__)
         if detector == "sift":
             self.detector = cv.SIFT_create()

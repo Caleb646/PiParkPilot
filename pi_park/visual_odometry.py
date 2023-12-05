@@ -4,10 +4,13 @@ from scipy.optimize import minimize
 import math
 import logging
 import time
-from typing import Tuple, List
+from typing import Tuple, List, Union
 
 from pi_park.kp_matcher import KPMatcher
+from pi_park.filter import KalmanFilter
 import pi_park.utils as utils
+
+logger = logging.getLogger(__name__)
 
 def undistort_rectify(
         left: cv.Mat, 
@@ -43,35 +46,6 @@ def calculate_disparity_map(img_left: cv.Mat, img_right: cv.Mat):
         disp_left = matcher.compute(img_left, img_right).astype(np.float32) / 16
         return disp_left
 
-def decompose_euler_angles_from_proj_mat(proj_mat: np.ndarray):
-    _, _, _, _, _, _, euler_angles = cv.decomposeProjectionMatrix(proj_mat)
-    return euler_angles
-
-def decompose_projection_matrix(
-        proj_mat: np.ndarray
-        ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Returns
-    ---------
-    camera intrinsic matrix: shape -> (3, 3)
-    rotation matrix: shape -> (3, 3)
-    translation matrix: shape -> (3, 1). Has been de-homogenized.
-    """
-    # decomposeProjectionMatrix has 4 additional returns values 
-    # rotMatrX 3x3 rotation matrix around x-axis.
-    # rotMatrY 3x3 rotation matrix around y-axis.
-    # rotMatrZ 3x3 rotation matrix around z-axis.
-    # eulerAngles 3-element vector containing three Euler angles of rotation in degrees.
-    cam_intrinsic, cam_rotation, cam_translation, _, _, _, euler_angles = cv.decomposeProjectionMatrix(proj_mat)
-    cam_translation = (cam_translation / cam_translation[3])[:3]
-    return cam_intrinsic, cam_rotation, cam_translation
-
-def decompose_rotation_matrix(rot: np.ndarray):
-    x_theta = math.atan2(rot[2, 1], rot[2, 2])
-    y_theta = math.atan2(rot[2, 0], math.sqrt(rot[2, 1]**2 + rot[0, 0]**2))
-    z_theta = math.atan2(rot[1, 0], rot[0, 0])
-    return np.array([math.degrees(x_theta), math.degrees(y_theta), math.degrees(z_theta)])
-
 def calculate_depth_map(
         disp_left_pixels: cv.Mat, 
         focal_length_pixels: float, 
@@ -89,15 +63,26 @@ def stereo_to_depth(
         img_left: cv.Mat, 
         img_right: cv.Mat, 
         left_proj_mat: np.ndarray, 
-        right_proj_mat: np.ndarray
+        right_proj_mat: np.ndarray,
+        resize: Union[int, None] = 2
         ) -> cv.Mat:
-    disp = calculate_disparity_map(img_left, img_right)
-    left_intrinsic, r_left, trans_left = decompose_projection_matrix(left_proj_mat)
-    right_intrinsic, r_right, trans_right = decompose_projection_matrix(right_proj_mat)
+    left, right = img_left, img_right
+    if resize is not None:
+        assert resize % 2 == 0, f"Resize must be a multiple of 2 not [{resize}]"
+        height, width = img_left.shape[0] // resize, img_left.shape[1] // resize
+        left = cv.resize(left, (width, height), interpolation=cv.INTER_LINEAR)
+        right = cv.resize(right, (width, height), interpolation=cv.INTER_LINEAR)
+    disp = calculate_disparity_map(left, right)
+    left_intrinsic, r_left, trans_left = utils.decompose_projection_matrix(left_proj_mat)
+    right_intrinsic, r_right, trans_right = utils.decompose_projection_matrix(right_proj_mat)
     # focal length and disparity are measured in pixels, then the pixel units will cancel, 
     # and if we have our baseline measured in meters, then our Z measurement will be in meters
     # Distance between two cameras in meters i.e. the baseline: abs(trans_right[0] - trans_left[0])
-    return calculate_depth_map(disp, left_intrinsic[0, 0], abs(trans_right[0] - trans_left[0]))
+    depth_map = calculate_depth_map(disp, left_intrinsic[0, 0], abs(trans_right[0] - trans_left[0]))
+    if resize is not None:
+        height, width = img_left.shape[0], img_left.shape[1]
+        depth_map = cv.resize(depth_map, (width, height), interpolation=cv.INTER_LINEAR)
+    return depth_map
 
 class VisualOdometry:
     def __init__(
@@ -107,13 +92,14 @@ class VisualOdometry:
             keypt_matcher: KPMatcher = None,
             max_depth_meters: int = 5 # meters
             ) -> None:
-        self.logger = logging.getLogger(__name__)
+        #self.logger = logging.getLogger(__name__)
+        self.logger = logger
         self.left_proj_mat = left_cam_3dto2d_proj_mat
         self.right_proj_mat = right_cam3dto2d_proj_mat
         self.keypt_matcher = KPMatcher() if keypt_matcher is None else keypt_matcher
         self.max_depth_m = max_depth_meters
-        self.left_cam_intrinsic, self.left_cam_rotation, self.left_cam_translation = decompose_projection_matrix(self.left_proj_mat)
-        self.right_cam_intrinsic, self.right_cam_rotation, self.right_cam_translation = decompose_projection_matrix(self.right_proj_mat)
+        self.left_cam_intrinsic, self.left_cam_rotation, self.left_cam_translation = utils.decompose_projection_matrix(self.left_proj_mat)
+        self.right_cam_intrinsic, self.right_cam_rotation, self.right_cam_translation = utils.decompose_projection_matrix(self.right_proj_mat)
         self.window_size = 3
         """
         Determines how many previous frames information to save
@@ -131,6 +117,8 @@ class VisualOdometry:
         shape -> (window size, 3, 4).
         Saved camera projection matrices. The last index is the current camera pose
         """
+        # TODO: pass fps to kalman
+        self.kalman_filter = KalmanFilter(0.25)
 
 
     def windowed_bundle_adjustment(self):
@@ -226,8 +214,10 @@ class VisualOdometry:
                 next_points, 
                 self.left_cam_intrinsic, 
                 None,
-                iterationsCount=200,
-                reprojectionError=5.0,
+                #iterationsCount=200,
+                iterationsCount=400,
+                #reprojectionError=5.0,
+                reprojectionError=2.0,
                 confidence=0.99
                 )
         if succeeded is False:
@@ -235,8 +225,17 @@ class VisualOdometry:
             return None, None, None, None, False
         
         rmat = cv.Rodrigues(rvec)[0]
+        kal_success, trans_est, rot_est = self.kalman_filter.predict_update(tvec, rmat, inliers.shape[0])
+        self.logger.debug(f"Kalman Filter predicted translation: {trans_est}")
+        if not kal_success:
+            self.logger.error(
+                f"Kalman Filter failed to estimate new position"
+                f" while estimating motion."
+                )
+            return None, None, None, None, False
         self.logger.info(f"Took {time.time() - start_time} seconds to successfully estimate motion.")
-        return rmat, tvec, cur_points, next_points, True
+        return rot_est, trans_est, cur_points, next_points, True
+        #return rmat, tvec, cur_points, next_points, True
 
 if __name__ == "__main__":
     pass

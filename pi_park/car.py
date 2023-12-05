@@ -134,7 +134,7 @@ class Car:
             config_path: str,
             ip="127.0.1.1",
             img_log_dir: Union[str, None] = None,
-            should_camera_check=True
+            should_camera_check = True
             ):
         #self.logger = logging.getLogger(__name__)
         self.logger = logger
@@ -172,8 +172,14 @@ class Car:
         z will be forward and backward with forward being the direction that the camera is initially facing.
         """
         self.visual_od = vo.VisualOdometry(self.left_proj, self.right_proj)
-        self.left_cap = cv.VideoCapture(self.config["left_cam_id"])
-        self.right_cap = cv.VideoCapture(self.config["right_cam_id"])
+        if "win" in sys.platform:
+            self.logger.info(f"Using Windows VideoCapture setup: [{sys.platform}]")
+            self.left_cap = cv.VideoCapture(self.config["left_cam_id"], cv.CAP_DSHOW)
+            self.right_cap = cv.VideoCapture(self.config["right_cam_id"], cv.CAP_DSHOW)
+        else:
+            self.logger.info(f"Using Default VideoCapture setup: [{sys.platform}]")
+            self.left_cap = cv.VideoCapture(self.config["left_cam_id"])
+            self.right_cap = cv.VideoCapture(self.config["right_cam_id"])
         self.left_cap.set(cv.CAP_PROP_FOURCC, cv.VideoWriter_fourcc("M", "J", "P", "G"))
         self.right_cap.set(cv.CAP_PROP_FOURCC, cv.VideoWriter_fourcc("M", "J", "P", "G"))
         assert self.left_cap.isOpened() and self.right_cap.isOpened()
@@ -226,7 +232,7 @@ class Car:
         -----------
         ``units -> degrees.`` The rotation around the y axis.
         """
-        return vo.decompose_rotation_matrix(self.mat_current_position[:3, :3])[1]
+        return utils.decompose_rotation_matrix(self.mat_current_position[:3, :3])[1]
     
     @property
     def xpos_normed(self):
@@ -245,6 +251,7 @@ class Car:
                 break
             cv.imshow("Should be Left Camera", left_img)
             cv.imshow("Should be Right Camera", right_img)
+        cv.destroyAllWindows()
 
     def step(self):
         start_time = time.time()
@@ -262,7 +269,9 @@ class Car:
             # Set the max allowed depth to the total distance from the camera's starting position
             # to the ending position plus 2 
             dist = np.squeeze(np.sqrt((self.xpos - self.end_pos[0])**2 + (self.zpos - self.end_pos[1])**2))
-            self.visual_od.max_depth_m = dist + 2
+            #self.visual_od.max_depth_m = max(dist + 2, 7)
+            # TODO: Change
+            self.visual_od.max_depth_m = 300
 
             self.aspect_ratio = (self.end_pos[1] - self.zpos) /(self.end_pos[0] - self.xpos)
             x_car, _, z_car, y_rot = self.position
@@ -309,9 +318,13 @@ class Car:
             return True
         return False
     
-    async def drive(self, target_fps=15) -> None:
+    async def drive(self, target_fps=15, wait_on_connection=True) -> None:
         run_server = asyncio.create_task(self.server_.run())
-        driving = asyncio.create_task(self.drive_(target_fps=target_fps))
+        driving = asyncio.create_task(
+            self.drive_(
+                target_fps=target_fps, wait_on_connection=wait_on_connection
+                )
+            )
         done, pending = await asyncio.wait(
             [run_server, driving],
             return_when=asyncio.FIRST_COMPLETED
@@ -319,9 +332,9 @@ class Car:
         for task in pending:
             task.cancel()
     
-    async def drive_(self, target_fps=15):
+    async def drive_(self, target_fps=15, wait_on_connection=True):
         while not self.at_end_pos():
-            if self.server_.has_connections():
+            if self.server_.has_connections() or not wait_on_connection:
                 step_time = self.step()
                 sleep_time = max((1/target_fps) - step_time, 0.01)
                 self.logger.info(
@@ -368,9 +381,6 @@ class Car:
         s2 = time.time()
         right_success, right = self.right_cap.read()
         e2 = time.time()
-        self.logger.debug(
-            f"Left Image Res (h, w, c): {left.shape} ----- Right Image Res (h, w, c): {right.shape}"
-            )
         if not self.calibrated_frame_size == left.shape[:2]\
             or not self.calibrated_frame_size == right.shape[:2]:
             self.logger.error(

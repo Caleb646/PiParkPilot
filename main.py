@@ -11,16 +11,21 @@ from typing import Tuple, List, Union, Dict
 from pi_park.api import car, utils, vo
 
 
+# Times on Laptop:
+# Depth Map Creation Time: 0.017440080642700195 seconds
+
 if __name__ == "__main__":
+    car_ = car.Car(
+        config_path="./pi_park/configs/basic_config.yml", 
+        #ip="192.168.1.38",
+        #img_log_dir="./logs/img_log/",
+        should_camera_check=False
+        )
     try:
-        car_ = car.Car(
-            config_path="./pi_park/configs/pi_config.yml", 
-            ip="192.168.1.38",
-            #img_log_dir="./logs/img_log/",
-            should_camera_check=False
-            )
-        asyncio.run(car_.drive(target_fps=1))
+        #car_.drive_without_server_(target_fps=0.25)
+        asyncio.run(car_.drive(target_fps=0.25, wait_on_connection=False))
     except:
+        #car_.shutdown()
         asyncio.run(car_.shutdown())
         asyncio.get_event_loop().stop()
 
@@ -62,4 +67,4 @@ if __name__ == "__main__":
     #     #img_log_dir="./logs/img_log/",
     #     should_camera_check=False
     #     )
-    # car_.drive_without_server_(target_fps=0.25)
+    
