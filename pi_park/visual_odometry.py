@@ -12,22 +12,6 @@ import pi_park.utils as utils
 
 logger = logging.getLogger(__name__)
 
-def undistort_rectify(
-        left: cv.Mat, 
-        right: cv.Mat,
-        left_x_map: cv.Mat,
-        left_y_map: cv.Mat,
-        right_x_map: cv.Mat,
-        right_y_map: cv.Mat
-        ):
-    left_undistorted = cv.remap(
-        left, left_x_map, left_y_map, cv.INTER_LANCZOS4, cv.BORDER_CONSTANT, 0
-        )
-    right_undistorted = cv.remap(
-        right, right_x_map, right_y_map, cv.INTER_LANCZOS4, cv.BORDER_CONSTANT, 0
-        )
-    return left_undistorted, right_undistorted
-
 def calculate_disparity_map(img_left: cv.Mat, img_right: cv.Mat):
         sad_window = 6
         num_disparities = sad_window*16

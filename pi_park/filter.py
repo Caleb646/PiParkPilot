@@ -3,12 +3,12 @@ import numpy as np
 import logging
 from typing import Tuple, List, Union
 
-# import pathlib
-# import os
-# import sys
-# parent = pathlib.Path(os.path.abspath(os.path.curdir))
-# path = os.path.join(str(parent))
-# sys.path.append(path)
+import pathlib
+import os
+import sys
+parent = pathlib.Path(os.path.abspath(os.path.curdir))
+path = os.path.join(str(parent))
+sys.path.append(path)
 
 
 import pi_park.utils as utils
@@ -163,13 +163,11 @@ class KalmanFilter:
 
 if __name__ == "__main__":
 
-
-
     kf = KalmanFilter(1)
 
     print(kf.predict_update(np.array([0, 0, 0]), np.eye(3, 3), 35)[1])
     print(kf.predict_update(np.array([1, 0, 1]), np.eye(3, 3), 35)[1])
-    print(kf.predict_update(np.array([1, 0, 1]), np.eye(3, 3), 35)[1])
-    print(kf.predict_update(np.array([1, 0, 1]), np.eye(3, 3), 35)[1])
+    print(kf.predict_update(np.array([2, 0, 1]), np.eye(3, 3), 35)[1])
+    print(kf.predict_update(np.array([3, 0, 1]), np.eye(3, 3), 35)[1])
 
             

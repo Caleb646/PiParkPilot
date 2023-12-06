@@ -11,6 +11,7 @@ from typing import Tuple, List, Union, Dict
 import os
 
 import pi_park.visual_odometry as vo
+from pi_park.stereo_camera import StereoCamera
 import pi_park.server as ws_server
 import pi_park.utils as utils
 
@@ -139,25 +140,9 @@ class Car:
         #self.logger = logging.getLogger(__name__)
         self.logger = logger
         self.config = utils.load_yaml_file(config_path)
-
-        cv_file = cv.FileStorage()
-        cv_file.open(self.config["stereo_map_path"], cv.FileStorage_READ)
-
-        self.left_x_stereo_map = cv_file.getNode('left_x_stereo_map').mat()
-        self.left_y_stereo_map = cv_file.getNode('left_y_stereo_map').mat()
-        self.right_x_stereo_map = cv_file.getNode('right_x_stereo_map').mat()
-        self.right_y_stereo_map = cv_file.getNode('right_y_stereo_map').mat()
-        self.left_proj = cv_file.getNode("left_cam_projection").mat()
-        """
-        shape -> (3, 4).
-        The left camera's initial extrinsic matrix will be the origin for the world.
-        Every point's position will be relative to it.
-        """
-        self.right_proj = cv_file.getNode("right_cam_projection").mat()
-        """
-        shape -> (3, 4).
-        """
-        cv_file.release()
+        self.cam = StereoCamera(
+            self.config["left_id"], self.config["right_id"], self.config["stereo_map_path"]
+            )
         # TODO: if forward is in the direction the camera is initially facing
         # and the camera's initial facing is not parallel with the side of the car 
         # then the car's forward/backward motion will have to be offset somehow.
@@ -171,18 +156,7 @@ class Car:
         y should be remain relative constant as the car shouldn't be moving up and down. 
         z will be forward and backward with forward being the direction that the camera is initially facing.
         """
-        self.visual_od = vo.VisualOdometry(self.left_proj, self.right_proj)
-        if "win" in sys.platform:
-            self.logger.info(f"Using Windows VideoCapture setup: [{sys.platform}]")
-            self.left_cap = cv.VideoCapture(self.config["left_cam_id"], cv.CAP_DSHOW)
-            self.right_cap = cv.VideoCapture(self.config["right_cam_id"], cv.CAP_DSHOW)
-        else:
-            self.logger.info(f"Using Default VideoCapture setup: [{sys.platform}]")
-            self.left_cap = cv.VideoCapture(self.config["left_cam_id"])
-            self.right_cap = cv.VideoCapture(self.config["right_cam_id"])
-        self.left_cap.set(cv.CAP_PROP_FOURCC, cv.VideoWriter_fourcc("M", "J", "P", "G"))
-        self.right_cap.set(cv.CAP_PROP_FOURCC, cv.VideoWriter_fourcc("M", "J", "P", "G"))
-        assert self.left_cap.isOpened() and self.right_cap.isOpened()
+        self.visual_od = vo.VisualOdometry(self.cam.left_proj, self.cam.right_proj)
 
         self.left_prev_img: Union[cv.Mat, None] = None
         self.right_prev_img: Union[cv.Mat, None] = None
@@ -243,9 +217,8 @@ class Car:
         return self.zpos / max((self.end_pos[1] - self.zpos), 1)
     
     def visually_check_cameras(self):
-        while self.left_cap.isOpened() and self.right_cap.isOpened():
-            _, left_img = self.left_cap.read()
-            _, right_img = self.right_cap.read()
+        while self.cam.is_opened():
+            left_img, right_img = self.cam.read()
             k = cv.waitKey(5)
             if k == ord("q") or k == 27: # press q or esc to quit
                 break
@@ -255,7 +228,7 @@ class Car:
 
     def step(self):
         start_time = time.time()
-        left_next_img, right_next_img = self.read_images()
+        left_next_img, right_next_img = self.cam.read()
         # Possible States -> We've failed to get the next set of images
         if left_next_img is None or right_next_img is None:
             self.left_prev_img, self.right_prev_img = None, None
@@ -357,8 +330,7 @@ class Car:
             self.logger.info(f"Step Time: {step_time} seconds ---- Sleep Time {sleep_time} seconds")
 
     async def shutdown(self):
-        self.left_cap.release()
-        self.right_cap.release()
+        self.cam.shutdown()
         self.left_prev_img, self.right_prev_img = None, None
         await self.server_.shutdown()
 
@@ -370,50 +342,6 @@ class Car:
             "cur_path": self.current_path.tolist()
         }
         
-    def read_images(self, to_gray_scale=True):
-        assert self.left_cap.isOpened() and self.right_cap.isOpened()
-        #if self.left_cap.isOpened() and self.right_cap.isOpened():
-        # TODO: reading the left and right images may need to be synchronized 
-        # better than this.
-        s1 = time.time()
-        left_success, left = self.left_cap.read()
-        e1 = time.time()
-        s2 = time.time()
-        right_success, right = self.right_cap.read()
-        e2 = time.time()
-        if not self.calibrated_frame_size == left.shape[:2]\
-            or not self.calibrated_frame_size == right.shape[:2]:
-            self.logger.error(
-                f"Image Res != calibrated res. "
-                f"Left Image Res (h, w): {left.shape[:2]} ----- Right Image Res (h, w): {right.shape[:2]}"
-                f" ----- Calibrated Res: {self.calibrated_frame_size}"
-                )
-            raise ValueError("Calib Res != Image Res")
-        if not left_success or not right_success:
-            self.logger.error(f"Left Camera Failed: {not left_success} ----- Right Camera Failed: {not right_success}")
-            return None, None
-        self.logger.debug(
-            f"Left Cam -> Duration: {round(e1 - s1, 4)} ---- Right Cam -> Duration: {round(e2 - s2, 4)} "
-            f"--- Out of Sync by {round(abs(e2-e1), 4)} seconds"
-            )
-        if to_gray_scale:
-            left, right = cv.cvtColor(left, cv.COLOR_BGR2GRAY), cv.cvtColor(right, cv.COLOR_BGR2GRAY)
-        left, right = vo.undistort_rectify(
-            left, 
-            right, 
-            self.left_x_stereo_map, 
-            self.left_y_stereo_map,
-            self.right_x_stereo_map,
-            self.right_y_stereo_map
-            )
-        if self.img_log_dir is not None:
-            cur_time = utils.get_current_time()
-            left_path = os.path.join(self.img_log_dir, f"left_{cur_time}.jpg")
-            right_path = os.path.join(self.img_log_dir, f"right_{cur_time}.jpg")
-            cv.imwrite(left_path, left)
-            cv.imwrite(right_path, right)
-        return left, right
-    
 if __name__ == "__main__":
     #car = Car()
     #car.drive_without_server_(target_fps=10, verbose=True)
