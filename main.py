@@ -19,11 +19,11 @@ if __name__ == "__main__":
         config_path="./pi_park/configs/basic_config.yml", 
         #ip="192.168.1.38",
         #img_log_dir="./logs/img_log/",
-        should_camera_check=False
+        should_camera_check=True
         )
     try:
         #car_.drive_without_server_(target_fps=0.25)
-        asyncio.run(car_.drive(target_fps=0.25, wait_on_connection=False))
+        asyncio.run(car_.drive(target_fps=0.5, wait_on_connection=False))
     except:
         #car_.shutdown()
         asyncio.run(car_.shutdown())

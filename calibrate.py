@@ -140,7 +140,7 @@ rotation_right = right_extrinsic[:3, :3]
 trans_right = right_extrinsic[:3, 3]
 
 rectifyScale = 1
-left_rectify, right_rectify, left_proj, right_proj, Q, left_roi, right_roi = cv.stereoRectify(
+left_rectify, right_rectify, left_proj, right_proj, Q, left_region_of_interest, right_region_of_interest = cv.stereoRectify(
     left_intrinic, left_dist_coeffs, right_intrinsic, right_dist_coeffs, (width_img, height_img), rotation_right, trans_right, rectifyScale, (0, 0)
     )
 
@@ -151,10 +151,6 @@ left_stereo_map = cv.initUndistortRectifyMap(
 right_stereo_map = cv.initUndistortRectifyMap(
     right_intrinsic, right_dist_coeffs, right_rectify, right_proj, (width_img, height_img), cv.CV_16SC2
     )
-
-#print(left_proj, "\n\n", right_proj)
-
-#assert False
 
 cv_file = cv.FileStorage(config["stereo_map_path"], cv.FILE_STORAGE_WRITE)
 

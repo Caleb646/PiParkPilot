@@ -11,8 +11,8 @@ right_imgs_path: "./data/calib/right_imgs/"
 stereo_map_path: "./data/calib/stereo_map.xml"
 max_allowable_rmse: 0.25
 # Camera Setup
-left_cam_id: 1
-right_cam_id: 0
+left_cam_id: 0
+right_cam_id: 1
 # Car Setup
 max_steering_angle: 25 # in degrees
 axles_distance: 2 # in meters

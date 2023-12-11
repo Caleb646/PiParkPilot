@@ -141,7 +141,7 @@ class Car:
         self.logger = logger
         self.config = utils.load_yaml_file(config_path)
         self.cam = StereoCamera(
-            self.config["left_id"], self.config["right_id"], self.config["stereo_map_path"]
+            self.config["left_cam_id"], self.config["right_cam_id"], self.config["stereo_map_path"]
             )
         # TODO: if forward is in the direction the camera is initially facing
         # and the camera's initial facing is not parallel with the side of the car 
@@ -179,12 +179,12 @@ class Car:
         self.server_ = ws_server.WebSocketServer(host=ip)
         self.calibrated_frame_size = tuple(self.config["frame_size"])
 
+        if should_camera_check:
+            self.visually_check_cameras()
+
         self.img_log_dir = img_log_dir
         if self.img_log_dir is not None:
             utils.clear_dir(self.img_log_dir)
-
-        if should_camera_check:
-            self.visually_check_cameras()
 
     @property
     def position(self):
@@ -214,7 +214,7 @@ class Car:
     
     @property
     def zpos_normed(self):
-        return self.zpos / max((self.end_pos[1] - self.zpos), 1)
+        return self.zpos / (self.end_pos[1] - self.zpos)
     
     def visually_check_cameras(self):
         while self.cam.is_opened():
@@ -244,7 +244,7 @@ class Car:
             dist = np.squeeze(np.sqrt((self.xpos - self.end_pos[0])**2 + (self.zpos - self.end_pos[1])**2))
             #self.visual_od.max_depth_m = max(dist + 2, 7)
             # TODO: Change
-            self.visual_od.max_depth_m = 300
+            self.visual_od.max_depth_m = 10
 
             self.aspect_ratio = (self.end_pos[1] - self.zpos) /(self.end_pos[0] - self.xpos)
             x_car, _, z_car, y_rot = self.position
@@ -258,21 +258,26 @@ class Car:
             self.left_prev_img, self.right_prev_img = left_next_img, right_next_img
             self.logger.warn("Previous images are none")
             return time.time() - start_time
-        updated_rotation, updated_position, _, _, succeeded = self.visual_od.estimate_motion(
-            self.left_prev_img, self.right_prev_img, left_next_img, right_next_img
+        
+        updated_rotation, updated_position, depth_map, _, _, succeeded = self.visual_od.estimate_motion(
+            self.left_prev_img, 
+            self.right_prev_img, 
+            left_next_img, 
+            right_next_img,
+            use_kalman_filter=True
             )
+        
+        # self.log_imgs([self.depth2img(depth_map)], f"depth_{str(succeeded)}")
         # Possible States
         if succeeded:
-            # Is the updated path following the generated path? Do I even need to check this?
-            Tmat = np.eye(4)
-            Tmat[:3, :3] = updated_rotation
-            Tmat[:3, 3] = updated_position.T
             # Take the updated camera matrix (extrinsic + intrinsic) and find the inverse.
             # Taking the matrix product of the current position with the inverse of the new camera 
             # matrix moves the current position to the new world coordinate.
             # The inverse of the new camera matrix gives creates a transformation from camera space to
             # world space instead of vice versa.
-            self.mat_current_position = self.mat_current_position.dot(np.linalg.inv(Tmat))[:3, :]
+            self.mat_current_position = vo.project_position(
+                self.mat_current_position, updated_rotation, updated_position
+                )
             self.left_prev_img, self.right_prev_img = left_next_img, right_next_img
             self.logger.info(f"New Position: {self.position}")
         else:

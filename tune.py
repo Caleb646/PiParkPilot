@@ -12,13 +12,13 @@ import pi_park.visual_odometry as vo
 
 loading = False
 variables = ["SWS", "SpeckleSize", "SpeckleRange", "UniqRatio", "TxtrThrshld", "NumofDisp",
-    "MinDisp", "PreFiltCap", "PreFiltSize", "P1", "P2"]
+    "MinDisp", "PreFiltCap", "PreFiltSize", "P1", "P2", "Resize"]
 
-variable_mapping = {"SWS" : 15, "SpeckleSize" : 100, "SpeckleRange" : 15, "UniqRatio" : 10, "TxtrThrshld" : 100, "NumofDisp" : 1,
+variable_mapping = {"Resize": 1, "SWS" : 15, "SpeckleSize" : 100, "SpeckleRange" : 15, "UniqRatio" : 10, "TxtrThrshld" : 100, "NumofDisp" : 1,
     "MinDisp": -25, "PreFiltCap" : 30, "PreFiltSize" : 105, "P1": 8, "P2": 32}
 
-def calculate_disparity_map(img_left, img_right, camera: StereoCamera):
-        sad_window = 7
+def calculate_disparity_map(left_img, right_img, camera: StereoCamera):
+        sad_window = 6
         num_disparities = sad_window*16
         block_size = 11
         matcher = cv2.StereoSGBM_create(
@@ -27,23 +27,29 @@ def calculate_disparity_map(img_left, img_right, camera: StereoCamera):
             blockSize=variable_mapping["SWS"],
             P1 = variable_mapping["P1"],
             P2 = variable_mapping["P2"],
-            #mode=cv2.STEREO_SGBM_MODE_SGBM_3WAY
+            mode=cv2.STEREO_SGBM_MODE_SGBM_3WAY
             #mode=cv2.STEREO_SGBM_MODE_HH
             )
-        disp_left = matcher.compute(img_left, img_right).astype(np.float32) / 16
+        
+        resize = variable_mapping["Resize"]
+        height, width = left_img.shape[0], left_img.shape[1]
+        re_height, re_width = height // resize, width // resize
+
+        left_re = cv2.resize(left_img, (re_width, re_height), interpolation=cv2.INTER_LINEAR_EXACT)
+        right_re = cv2.resize(right_img, (re_width, re_height), interpolation=cv2.INTER_LINEAR_EXACT)
+
+        disp_left = matcher.compute(left_re, right_re)
+        disp_left = vo.filter_disparity_map(left_re, right_re, disp_left, matcher)
+        disp_left = disp_left.astype(np.float32) / 16
+
+        disp_left = cv2.resize(disp_left, (width, height), interpolation=cv2.INTER_LINEAR_EXACT)
+
         disparity_normalized = cv2.normalize(disp_left, None, 0, 255, cv2.NORM_MINMAX)
         image = np.array(disparity_normalized, dtype = np.uint8)
         disparity_color = cv2.applyColorMap(image, cv2.COLORMAP_JET)
         return disparity_color, vo.calculate_depth_map(disp_left, camera.focal_length_pixel, camera.baseline_meters)
 
-def stereo_depth_map(rectified_pair, variable_mapping):
-
-    '''print ('SWS='+str(SWS)+' PFS='+str(PFS)+' PFC='+str(PFC)+' MDS='+\
-           str(MDS)+' NOD='+str(NOD)+' TTH='+str(TTH))
-    print (' UR='+str(UR)+' SR='+str(SR)+' SPWS='+str(SPWS))'''
-
-    #blockSize is the SAD Window Size
-    #Filter settings
+def stereo_depth_map(left_img, right_img, camera: StereoCamera):
     sbm = cv2.StereoBM_create(numDisparities=16, blockSize=variable_mapping["SWS"]) 
     sbm.setPreFilterType(1)    
     sbm.setPreFilterSize(variable_mapping['PreFiltSize'])
@@ -54,17 +60,33 @@ def stereo_depth_map(rectified_pair, variable_mapping):
     sbm.setNumDisparities(variable_mapping['NumofDisp'])
     sbm.setTextureThreshold(variable_mapping['TxtrThrshld'])
     sbm.setUniquenessRatio(variable_mapping['UniqRatio'])
+
+    resize = variable_mapping["Resize"]
+    height, width = left_img.shape[0], left_img.shape[1]
+    re_height, re_width = height // resize, width // resize
+
+    left_re = cv2.resize(left_img, (re_width, re_height), interpolation=cv2.INTER_LINEAR_EXACT)
+    right_re = cv2.resize(right_img, (re_width, re_height), interpolation=cv2.INTER_LINEAR_EXACT)
+
     
 
-    c, r = rectified_pair[0].shape
-    dmLeft = rectified_pair[0]
-    dmRight = rectified_pair[1]
-    disparity = sbm.compute(dmLeft, dmRight)
+    wls_filter = cv2.ximgproc.createDisparityWLSFilter(sbm)
+    wls_filter.setLambda(8000.0)
+    wls_filter.setSigmaColor(1.5)
+    
+
+    left_disparity = sbm.compute(left_re, right_re).astype(np.float32) / 16
+    right_disparity = sbm.compute(right_re, left_re).astype(np.float32) / 16
+
+    left_disparity = wls_filter.filter(left_disparity, left_re, disparity_map_right=right_disparity)
+
+    disparity = cv2.resize(left_disparity, (width, height), interpolation=cv2.INTER_LINEAR_EXACT)
+
     disparity_normalized = cv2.normalize(disparity, None, 0, 255, cv2.NORM_MINMAX)
-    #Convering Numpy Array to CV_8UC1
     image = np.array(disparity_normalized, dtype = np.uint8)
     disparity_color = cv2.applyColorMap(image, cv2.COLORMAP_JET)
-    return disparity_color, disparity_normalized
+
+    return disparity_color, vo.calculate_depth_map(disparity, camera.focal_length_pixel, camera.baseline_meters) #disparity_normalized
 
 def save_load_map_settings(current_save, current_load, variable_mapping):
     global loading
@@ -105,7 +127,7 @@ def create_trackbars() :
 
     #SWS cannot be larger than the image width and image heights.
     #In this case, width = 320 and height = 240
-    cv2.createTrackbar("SWS", "Stereo", 115, 230, activateTrackbars)
+    cv2.createTrackbar("SWS", "Stereo", 0, 110, activateTrackbars)
     cv2.createTrackbar("SpeckleSize", "Stereo", 0, 300, activateTrackbars)
     cv2.createTrackbar("SpeckleRange", "Stereo", 0, 40, activateTrackbars)
     cv2.createTrackbar("UniqRatio", "Stereo", 1, 20, activateTrackbars)
@@ -116,8 +138,10 @@ def create_trackbars() :
     cv2.createTrackbar("PreFiltSize", "Stereo", 5, 255, activateTrackbars)
 
 
-    cv2.createTrackbar("P1", "Stereo", 0, 1024, activateTrackbars)
-    cv2.createTrackbar("P2", "Stereo", 0, 2056, activateTrackbars)
+    cv2.createTrackbar("P1", "Stereo", 0, 2056, activateTrackbars)
+    cv2.createTrackbar("P2", "Stereo", 0, 4056, activateTrackbars)
+
+    cv2.createTrackbar("Resize", "Stereo", 1, 2, activateTrackbars)
 
 
     cv2.createTrackbar("Save Settings", "Stereo", 0, 1, activateTrackbars)
@@ -131,7 +155,7 @@ def onMouse(event, x, y, flag, disparity_normalized):
 
 
 if __name__ == '__main__':
-    camera = StereoCamera(1, 0, "data/calib/stereo_map.xml")
+    camera = StereoCamera(0, 1, "data/calib/stereo_map.xml")
     # Initialise trackbars and windows
     cv2.namedWindow("Stereo")
     create_trackbars()
@@ -174,7 +198,7 @@ if __name__ == '__main__':
             save_load_map_settings(current_save, current_load, variable_mapping)
             cv2.setTrackbarPos("Save Settings", "Stereo", 0)
             cv2.setTrackbarPos("Load Settings", "Stereo", 0)
-            #disparity_color, disparity_normalized = stereo_depth_map(rectified_pair, variable_mapping)
+            #disparity_color, disparity_normalized = stereo_depth_map(*rectified_pair, camera)
             disparity_color, disparity_normalized = calculate_disparity_map(*rectified_pair, camera)
 
             #What happens when the mouse is clicked

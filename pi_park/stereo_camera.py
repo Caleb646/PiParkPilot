@@ -123,13 +123,7 @@ class StereoCamera:
 
         if self.rectify_map_path is not None:
             left, right = self.undistort_rectify(left, right)
-
-        if self.img_log_dir is not None:
-            cur_time = utils.get_current_time()
-            left_path = os.path.join(self.img_log_dir, f"left_{cur_time}.jpg")
-            right_path = os.path.join(self.img_log_dir, f"right_{cur_time}.jpg")
-            cv.imwrite(left_path, left)
-            cv.imwrite(right_path, right)
+            
         return left, right
 
 if __name__ == "__main__":

@@ -16,7 +16,7 @@ class KTTISequence:
             os.path.join(os.path.join(path_to_sequence, "image_1", fname)) 
             for fname in sorted(os.listdir(os.path.join(path_to_sequence, "image_1")))
             ]
-        self.image_paths = list(zip(self.left_image_fnames, self.right_image_fnames, strict=True))
+        self.image_paths = list(zip(self.left_image_fnames, self.right_image_fnames))
         if read_first == -1: # if -1 read all of the images
             read_first = len(self.image_paths)
         self.image_paths = self.image_paths[:min(read_first, len(self.image_paths))]
@@ -34,6 +34,7 @@ class KTTISequence:
         # and projecting them onto the image plane of the left camera.
         self.left_proj_mat = np.array(self.calib.loc['P0:']).reshape((3,4))
         self.right_proj_mat = np.array(self.calib.loc['P1:']).reshape((3,4))
+        
         self.poses = pd.read_csv(os.path.join(path_to_sequence, "poses.txt"), delimiter=' ', header=None)
         self.times = np.array(pd.read_csv(os.path.join(path_to_sequence, "times.txt"), delimiter=' ', header=None))
         self.ground_truths = np.zeros((self.num_frames, 3, 4))

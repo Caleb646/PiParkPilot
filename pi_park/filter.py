@@ -3,6 +3,9 @@ import numpy as np
 import logging
 from typing import Tuple, List, Union
 
+
+
+
 import pathlib
 import os
 import sys
@@ -65,25 +68,25 @@ class KalmanFilter:
         #  [0 0 0  0  0  0   0   0   0 0 0 0  0  0  0   0   1   0]
         #  [0 0 0  0  0  0   0   0   0 0 0 0  0  0  0   0   0   1]
 
-        # self.kalman.transitionMatrix[0, 3] = self.dt
-        # self.kalman.transitionMatrix[1, 4] = self.dt
-        # self.kalman.transitionMatrix[2, 5] = self.dt
-        # self.kalman.transitionMatrix[3, 6] = self.dt
-        # self.kalman.transitionMatrix[4, 7] = self.dt
-        # self.kalman.transitionMatrix[5, 8] = self.dt
-        # self.kalman.transitionMatrix[0, 6] = 0.5 * self.dt**2
-        # self.kalman.transitionMatrix[1, 7] = 0.5 * self.dt**2
-        # self.kalman.transitionMatrix[2, 8] = 0.5 * self.dt**2
+        self.kalman.transitionMatrix[0, 3] = self.dt
+        self.kalman.transitionMatrix[1, 4] = self.dt
+        self.kalman.transitionMatrix[2, 5] = self.dt
+        self.kalman.transitionMatrix[3, 6] = self.dt
+        self.kalman.transitionMatrix[4, 7] = self.dt
+        self.kalman.transitionMatrix[5, 8] = self.dt
+        self.kalman.transitionMatrix[0, 6] = 0.5 * self.dt**2
+        self.kalman.transitionMatrix[1, 7] = 0.5 * self.dt**2
+        self.kalman.transitionMatrix[2, 8] = 0.5 * self.dt**2
 
-        # self.kalman.transitionMatrix[9, 12] = self.dt
-        # self.kalman.transitionMatrix[10, 13] = self.dt
-        # self.kalman.transitionMatrix[11, 14] = self.dt
-        # self.kalman.transitionMatrix[12, 15] = self.dt
-        # self.kalman.transitionMatrix[13, 16] = self.dt
-        # self.kalman.transitionMatrix[14, 17] = self.dt
-        # self.kalman.transitionMatrix[9, 15] = 0.5 * self.dt**2
-        # self.kalman.transitionMatrix[10, 16] = 0.5 * self.dt**2
-        # self.kalman.transitionMatrix[11, 17] = 0.5 * self.dt**2
+        self.kalman.transitionMatrix[9, 12] = self.dt
+        self.kalman.transitionMatrix[10, 13] = self.dt
+        self.kalman.transitionMatrix[11, 14] = self.dt
+        self.kalman.transitionMatrix[12, 15] = self.dt
+        self.kalman.transitionMatrix[13, 16] = self.dt
+        self.kalman.transitionMatrix[14, 17] = self.dt
+        self.kalman.transitionMatrix[9, 15] = 0.5 * self.dt**2
+        self.kalman.transitionMatrix[10, 16] = 0.5 * self.dt**2
+        self.kalman.transitionMatrix[11, 17] = 0.5 * self.dt**2
 
         
             # MEASUREMENT MODEL
@@ -97,17 +100,17 @@ class KalmanFilter:
         self.kalman.measurementMatrix = cv.setIdentity(
             self.kalman.measurementMatrix, 1
             )
-        # self.kalman.measurementMatrix[0, 0] = 1  # x
-        # self.kalman.measurementMatrix[1, 1] = 1  # y
-        # self.kalman.measurementMatrix[2, 2] = 1  # z
-        # self.kalman.measurementMatrix[3, 9] = 1  # roll
-        # self.kalman.measurementMatrix[4, 10] = 1 # pitch
-        # self.kalman.measurementMatrix[5, 11] = 1 # yaw
+        self.kalman.measurementMatrix[0, 0] = 1  # x
+        self.kalman.measurementMatrix[1, 1] = 1  # y
+        self.kalman.measurementMatrix[2, 2] = 1  # z
+        self.kalman.measurementMatrix[3, 9] = 1  # roll
+        self.kalman.measurementMatrix[4, 10] = 1 # pitch
+        self.kalman.measurementMatrix[5, 11] = 1 # yaw
 
 
-        # self.kalman.processNoiseCov = cv.setIdentity(
-        #     self.kalman.processNoiseCov, 0.01 #1e-5
-        #     )
+        self.kalman.processNoiseCov = cv.setIdentity(
+            self.kalman.processNoiseCov, 1e-5
+            )
         # self.kalman.processNoiseCov = np.eye(
         #     self.num_states, self.num_states
         #     ) * 1e-5
@@ -116,15 +119,15 @@ class KalmanFilter:
         the uncertainty in our motion model and affects how the Kalman 
         filter predicts the next state.
         """
-        # self.kalman.measurementNoiseCov = cv.setIdentity(
-        #     self.kalman.measurementNoiseCov, 0.1 #1e-4
-        #     )
+        self.kalman.measurementNoiseCov = cv.setIdentity(
+            self.kalman.measurementNoiseCov, 0.1 #1e-4
+            )
         # self.kalman.measurementNoiseCov = np.eye(
         #     self.num_measurements, self.num_measurements
         #     ) * 1e-4
-        # self.kalman.errorCovPost = cv.setIdentity(
-        #     self.kalman.errorCovPost, 0.1
-        #     )
+        self.kalman.errorCovPost = cv.setIdentity(
+            self.kalman.errorCovPost, 0.1
+            )
         # self.kalman.errorCovPost = np.eye(
         #     self.num_states, self.num_states
         #     ) * 1
@@ -133,12 +136,12 @@ class KalmanFilter:
         # self.kalman.statePost = np.zeros((self.num_states, 1))
 
 
-        #self.min_inliers_kalman = 30 # Kalman threshold updating
-        self.min_inliers_kalman = 15 # Kalman threshold updating
+        self.min_inliers_kalman = 30 # Kalman threshold updating
+        #self.min_inliers_kalman = 15 # Kalman threshold updating
 
     def predict_update(self, trans_measured, rot_measured, num_inliers):
         if num_inliers >= self.min_inliers_kalman:
-            self.logger.debug(f"Measured translation vector: {trans_measured}")
+            self.logger.debug(f"Measured translation vector: {np.squeeze(trans_measured)}")
             xr, yr, zr = utils.decompose_rotation_matrix(rot_measured)
             self.measurements[0, 0] = trans_measured[0] # x
             self.measurements[1, 0] = trans_measured[1] # y
@@ -147,9 +150,10 @@ class KalmanFilter:
             self.measurements[4, 0] = yr # yr
             self.measurements[5, 0] = zr # zr
 
-        prediction = self.kalman.predict()
-        estimate = np.squeeze(self.kalman.correct(self.measurements))
-        print(f"KF Estimate: {estimate}")
+        np.squeeze(self.kalman.correct(self.measurements))
+        estimate = self.kalman.predict()
+        #estimate = np.squeeze(self.kalman.correct(self.measurements))
+        
         new_trans = np.zeros((3,))
         new_trans[0] = estimate[0]
         new_trans[1] = estimate[1]
