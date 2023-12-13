@@ -35,18 +35,19 @@ class Mode:
     ACCGYRO_MODE = 0x05
     MAGGYRO_MODE = 0x06
     AMG_MODE = 0x07
-    IMUPLUS_MODE = 0x08
+    IMUPLUS_MODE = 0x08 
+    """
+    Fusion Mode with Accel and Gyro. `Orientation is relative` to initial starting position.
+    """
     COMPASS_MODE = 0x09
     M4G_MODE = 0x0A
     NDOF_FMC_OFF_MODE = 0x0B
     NDOF_MODE = 0x0C
+    """
+    Fusion Mode with Accel, Magnometer and Gyro. `Absolute orientation` = orientation of the sensor with respect to
+    the earth and its magnetic field.
+    """
 
-
-# Uncomment these lines for UART interface connection
-# uart = board.UART()
-# sensor = adafruit_bno055.BNO055_UART(uart)
-
-# Instantiate I2C interface connection
 i2c = board.I2C()
 sensor = adafruit_bno055.BNO055_I2C(i2c)
 sensor.mode = Mode.NDOF_MODE  # Set the sensor to NDOF_MODE
@@ -92,3 +93,9 @@ print("Insert these preset offset values into project code:")
 print(f"  Offsets_Magnetometer:  {sensor.offsets_magnetometer}")
 print(f"  Offsets_Gyroscope:     {sensor.offsets_gyroscope}")
 print(f"  Offsets_Accelerometer: {sensor.offsets_accelerometer}")
+
+"""
+  Offsets_Magnetometer:  (-97, -73, -463)
+  Offsets_Gyroscope:     (0, -2, 4)
+  Offsets_Accelerometer: (-2, -57, -17)
+"""
