@@ -7,7 +7,7 @@ import cv2 as cv
 import math
 import shutil
 from scipy import linalg
-from typing import Tuple, Union, List
+from typing import Tuple, Union, List, Optional
 
 logger = logging.getLogger(__name__)
 cv.Mat = np.ndarray
@@ -109,15 +109,46 @@ def get_current_time(format="%Hh%Mm%S.%f"):
     return curr_time.strftime(format)
     #return time.strftime(format)
 
-
-def log_imgs(imgs: List[cv.Mat], directory: Union[str, None]):
+def create_directory(directory: Optional[str]):
     if directory is not None:
         if not os.path.exists(directory):
             os.makedirs(directory, exist_ok=True)
-        for i, img in enumerate(imgs):
-            cur_time = get_current_time()
-            path = os.path.join(directory, f"{cur_time}__{i}.jpg")
-            saved = cv.imwrite(path, img)
+
+def log_imgs(imgs: List[cv.Mat], directory: Union[str, None]):
+    create_directory(directory)
+    for i, img in enumerate(imgs):
+        cur_time = get_current_time()
+        path = os.path.join(directory, f"{cur_time}__{i}.jpg")
+        saved = cv.imwrite(path, img)
+
+def read_stereo_directory(
+        main_directory: str, left_dir: str, right_dir: str, read_first=-1, to_gray_scale=True
+        ):
+    left_path = os.path.join(main_directory, left_dir)
+    right_path = os.path.join(main_directory, right_dir)
+    assert os.path.exists(left_path), f"Left Image path [{left_path}] does NOT exist"
+    assert os.path.exists(right_path), f"Right Image path [{right_path}] does NOT exist"
+    left_img_fnames = [
+        os.path.join(os.path.join(left_path, fname)) 
+        for fname in sorted(os.listdir(os.path.join(left_path)))
+    ]
+    right_img_fnames = [
+            os.path.join(os.path.join(right_path, fname)) 
+            for fname in sorted(os.listdir(os.path.join(right_path)))
+        ]
+    image_paths = list(zip(left_img_fnames, right_img_fnames))
+    if read_first == -1: # if -1 read all of the images
+            read_first = len(image_paths)
+    image_paths = image_paths[:min(read_first, len(image_paths))]
+    for i in range(len(image_paths) - 1):
+        cur_left = cv.imread(image_paths[i][0])
+        cur_right = cv.imread(image_paths[i][1])
+        next_left = cv.imread(image_paths[i+1][0])
+        next_right = cv.imread(image_paths[i+1][1])
+        if to_gray_scale:
+            cur_left, cur_right = cv.cvtColor(cur_left, cv.COLOR_BGR2GRAY), cv.cvtColor(cur_right, cv.COLOR_BGR2GRAY)
+            next_left, next_right = cv.cvtColor(next_left, cv.COLOR_BGR2GRAY), cv.cvtColor(next_right, cv.COLOR_BGR2GRAY)
+        yield cur_left, cur_right, next_left, next_right
 
 
 def normalize_img_coords(proj: np.ndarray, img_2d_pts: np.ndarray, distortionCoefs=None):

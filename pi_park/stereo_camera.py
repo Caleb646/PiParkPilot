@@ -22,8 +22,8 @@ cv.Mat = np.ndarray
 class StereoCamera:
     def __init__(
             self, 
-            left_id: int, 
-            right_id: int,
+            left_id: int = -1, 
+            right_id: int = -1,
             rectify_map_path: Union[str, None] = None,
             img_log_dir: Union[str, None] = None
             ) -> None:
@@ -51,17 +51,21 @@ class StereoCamera:
             self.left_intrinsic, self.rotation_left, self.trans_left = utils.decompose_projection_matrix(self.left_proj)
             self.right_intrinsic, self.rotation_right, self.trans_right = utils.decompose_projection_matrix(self.right_proj)
 
-        if "win" in sys.platform:
-            self.logger.info(f"Using Windows VideoCapture setup: [{sys.platform}]")
-            self.left_cap = cv.VideoCapture(left_id, cv.CAP_DSHOW)
-            self.right_cap = cv.VideoCapture(right_id, cv.CAP_DSHOW)
+        self.left_cap, self.right_cap = None, None
+        if left_id != -1 and right_id != -1:
+            if "win" in sys.platform:
+                self.logger.info(f"Using Windows VideoCapture setup: [{sys.platform}]")
+                self.left_cap = cv.VideoCapture(left_id, cv.CAP_DSHOW)
+                self.right_cap = cv.VideoCapture(right_id, cv.CAP_DSHOW)
+            else:
+                self.logger.info(f"Using Default VideoCapture setup: [{sys.platform}]")
+                self.left_cap = cv.VideoCapture(left_id)
+                self.right_cap = cv.VideoCapture(right_id)
+            self.left_cap.set(cv.CAP_PROP_FOURCC, cv.VideoWriter_fourcc("M", "J", "P", "G"))
+            self.right_cap.set(cv.CAP_PROP_FOURCC, cv.VideoWriter_fourcc("M", "J", "P", "G"))
+            assert self.left_cap.isOpened() and self.right_cap.isOpened()
         else:
-            self.logger.info(f"Using Default VideoCapture setup: [{sys.platform}]")
-            self.left_cap = cv.VideoCapture(left_id)
-            self.right_cap = cv.VideoCapture(right_id)
-        self.left_cap.set(cv.CAP_PROP_FOURCC, cv.VideoWriter_fourcc("M", "J", "P", "G"))
-        self.right_cap.set(cv.CAP_PROP_FOURCC, cv.VideoWriter_fourcc("M", "J", "P", "G"))
-        assert self.left_cap.isOpened() and self.right_cap.isOpened()
+            self.logger.info("Both the left and right camera ids were -1. So they the cameras were not setup.")
 
     @property
     def focal_length_pixel(self):

@@ -179,7 +179,7 @@ def keypoint_triangulate(
         left_proj: np.ndarray, 
         right_proj: np.ndarray, 
         kp_matcher: KPMatcher,
-        use_ssc=True
+        use_ssc=False
         ):
     with utils.Timer(logger.debug, "Key Point triangulating took: {} seconds"):
         lr_kpres = kp_matcher.find_keypoints(
@@ -192,9 +192,16 @@ def keypoint_triangulate(
             lr_kpres.matched_A_kpts, lr_kpres.matched_A_desc, cur_left_img, use_ssc=use_ssc
             )
         
+        left_final_pts = left_matched_pts
+        right_final_pts = right_matched_pts
+        # If ssc was used to prune clustered key points
+        # remove the points that were not selected by ssc
         if cp_kpres.ssc_A_selected_pts_idxs is not None:
             left_final_pts = left_matched_pts[cp_kpres.ssc_A_selected_pts_idxs]
             right_final_pts = right_matched_pts[cp_kpres.ssc_A_selected_pts_idxs]
+        else:
+            left_final_pts = np.asarray([left_final_pts[m.queryIdx] for m in cp_kpres.matches])
+            right_final_pts = np.asarray([right_final_pts[m.queryIdx] for m in cp_kpres.matches])
 
         draw_matches = False
         if draw_matches:
@@ -216,12 +223,14 @@ def keypoint_triangulate(
         # shape -> (4, number of points)
         # Only triangulate points that appear in both the left and right current images 
         # and also appear in the left previous image
-
+        
         # Polynomial triangulation is slightly more accurate
         contains_pts_at_inf, cur_3d_pts = utils.polynomial_triangulation(
             left_final_pts, left_proj, right_final_pts, right_proj
         )
-        reproj_error = utils.reprojection_error(left_proj, cur_3d_pts, utils.keypoints2points(cp_kpres.matched_A_kpts))
+        # print(f"Number of 3D pts: {cur_3d_pts.shape} --- Number of 2D pts: {left_final_pts.shape}")
+        # print(f"B Shape: {cp_kpres.matched_B_kpts.shape}")
+        reproj_error = utils.reprojection_error(left_proj, cur_3d_pts, left_final_pts)
         print(f"Reprojection Error: {reproj_error}")
         #print(cur_3d_pts[:3], cur_3d_pts.max(), np.abs(cur_3d_pts).min())
         #print(cur_3d_pts.max(), np.abs(cur_3d_pts).min())
@@ -241,8 +250,6 @@ def project_position(position: np.ndarray, rot_mat: np.ndarray, trans_vec: np.nd
     Tmat[:3, 3] = trans_vec.T
     return np.dot(position, np.linalg.inv(Tmat))[:3, :]
 
-
-
 @dataclass
 class MotionEstimateResult: 
     total_time: float
@@ -254,9 +261,6 @@ class MotionEstimateResult:
     reproj_error: Optional[float] = None
     ransac_pnp_inlier_idxs: Optional[np.ndarray] = None
     
-
-
-
 class VisualOdometry:
     def __init__(
             self, 
@@ -346,7 +350,8 @@ class VisualOdometry:
             cur_left_img,
             self.left_proj_mat,
             self.right_proj_mat,
-            self.keypt_matcher
+            self.keypt_matcher,
+            use_ssc=False
         )
         if tr_res.pts_3d.shape[0] < 6 or tr_res.cur_2d_pts.shape[0] < 6:
             self.logger.error(
@@ -402,8 +407,9 @@ class VisualOdometry:
             triangulate_result=tr_res,
             ransac_pnp_inlier_idxs=inliers
         )
+    
 
-if __name__ == "__main__":
+def test_with_kitti_sequence():
     from pi_park.ktti import KTTISequence
     from cProfile import Profile
     from pstats import SortKey, Stats
@@ -437,4 +443,29 @@ if __name__ == "__main__":
          .sort_stats(SortKey.CUMULATIVE)
          .print_stats()
         )
+
+def test_with_my_sequence(config_path: str, sequence_dir: str):
+    from pi_park.stereo_camera import StereoCamera
+
+    config = utils.load_yaml_file(config_path)
+    camera = StereoCamera(rectify_map_path=config["stereo_map_path"])
+    vo = VisualOdometry(camera.left_proj, camera.right_proj)
+    position = np.eye(4)[:3, :]
+    for prev_left_img, \
+        prev_right_img, \
+        cur_left_img, \
+        cur_right_img in utils.read_stereo_directory(sequence_dir, "left", "right"):
+        
+        estimate_res: MotionEstimateResult = vo.estimate_motion(
+            prev_left_img, prev_right_img, cur_left_img, cur_right_img, False
+            )
+        position = project_position(position, estimate_res.rmat, estimate_res.tvec)
+        rotation = utils.decompose_rotation_matrix(position[:3, :3])
+        print(f"New Position: {np.squeeze(position[:3, 3])}")
+        print(f"New Rotation: {rotation}")
+        
+
+if __name__ == "__main__":
+    #test_with_kitti_sequence()
+    test_with_my_sequence(f"{path}/pi_park/configs/basic_config.yml", f"{path}/data/test_data/my_cam/00/")
     #test_undistort()

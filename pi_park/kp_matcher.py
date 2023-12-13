@@ -121,34 +121,34 @@ class KPMatcher:
             self.filter_matches = bf_match_filter
         self.last = None
 
-    def find_keypoints_def(
-            self, left: cv.Mat, right: cv.Mat
-            ):
-        mask = None
-        # Left Image is the query image
-        # Right Image is the train image
-        left_kpts, left_desc = self.detector.detectAndCompute(left, mask)
-        right_kpts, right_desc = self.detector.detectAndCompute(right, mask)
-        matches = self.filter_matches(self.match_f(left_desc, right_desc))
+    # def find_keypoints_def(
+    #         self, left: cv.Mat, right: cv.Mat
+    #         ):
+    #     mask = None
+    #     # Left Image is the query image
+    #     # Right Image is the train image
+    #     left_kpts, left_desc = self.detector.detectAndCompute(left, mask)
+    #     right_kpts, right_desc = self.detector.detectAndCompute(right, mask)
+    #     matches = self.filter_matches(self.match_f(left_desc, right_desc))
 
-        left_matched_kpts = np.asarray([left_kpts[m.queryIdx] for m in matches])
-        right_matched_kpts = np.asarray([right_kpts[m.trainIdx] for m in matches])
+    #     left_matched_kpts = np.asarray([left_kpts[m.queryIdx] for m in matches])
+    #     right_matched_kpts = np.asarray([right_kpts[m.trainIdx] for m in matches])
 
-        left_matched_desc = np.asarray([left_desc[m.queryIdx] for m in matches])
-        right_matched_desc = np.asarray([right_desc[m.trainIdx] for m in matches])
+    #     left_matched_desc = np.asarray([left_desc[m.queryIdx] for m in matches])
+    #     right_matched_desc = np.asarray([right_desc[m.trainIdx] for m in matches])
 
 
-        return KPResult(
-            all_A_kpts=left_kpts,
-            all_A_desc=left_desc,
-            all_B_kpts=right_kpts,
-            all_B_desc=right_desc,
-            matches=matches,
-            matched_A_kpts=left_matched_kpts,
-            matched_A_desc=left_matched_desc,
-            matched_B_kpts=right_matched_kpts,
-            matched_B_desc=right_matched_desc
-        )
+    #     return KPResult(
+    #         all_A_kpts=left_kpts,
+    #         all_A_desc=left_desc,
+    #         all_B_kpts=right_kpts,
+    #         all_B_desc=right_desc,
+    #         matches=matches,
+    #         matched_A_kpts=left_matched_kpts,
+    #         matched_A_desc=left_matched_desc,
+    #         matched_B_kpts=right_matched_kpts,
+    #         matched_B_desc=right_matched_desc
+    #     )
     
     
     def find_keypoints(
@@ -188,6 +188,7 @@ class KPMatcher:
 
         if use_ssc is True:
             height, width = B_img.shape[:2]
+
             # queryIdx is the index into the original A_kpts array
             A_match_idxs = np.asarray([m.queryIdx for m in matches])
             B_match_idxs = np.asarray([m.trainIdx for m in matches])
@@ -219,8 +220,7 @@ class KPMatcher:
 
             A_matched_desc = A_desc[A_selected_indices]
             B_matched_desc = B_desc[B_selected_indices]
-            #return A_selected_indices, A_matched_kpts, A_matched_desc, B_matched_kpts, B_matched_desc
-        # NOTE: if use_ssc = True matches will no longer match A_matched_kpts and B_matched_kpts
+
         return KPResult(
             all_A_kpts=A_kpts,
             all_A_desc=A_desc,
