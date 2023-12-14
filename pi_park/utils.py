@@ -12,10 +12,20 @@ from typing import Tuple, Union, List, Optional
 logger = logging.getLogger(__name__)
 cv.Mat = np.ndarray
 
+def get_time():
+    return time.perf_counter()
+
 def depth2img(depth_map: cv.Mat):
     return np.array(cv.normalize(depth_map, None, 0, 255, cv.NORM_MINMAX), dtype=np.uint8)
 
 def euler2rotation(xr, yr, zr):
+    """
+    Parameters
+    --------------------
+    xr: (float) `should be in degrees`
+    yr: (float) `should be in degrees`
+    zr: (float) `should be in degrees`
+    """
     xrads = math.radians(xr)
     yrads = math.radians(yr)
     zrads = math.radians(zr)
@@ -67,7 +77,6 @@ def decompose_proj2intrisic_extrinsic(proj: np.ndarray):
     extrin[:3, :3] = rot
     extrin[:3, 3] = trans.T
     return intrin, extrin[:3]
-
 
 def keypoints2points(kpts):
     return np.asarray([kp.pt for kp in kpts])
